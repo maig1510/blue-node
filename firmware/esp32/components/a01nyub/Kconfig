@@ -1,0 +1,32 @@
+menu "A01NYUB Sensor"
+
+    config A01NYUB_DEFAULT_UART_PORT
+        int "Default UART port"
+        default 1
+        range 0 2
+
+    config A01NYUB_DEFAULT_RX_PIN
+        int "Default RX pin"
+        default 2
+        range 0 39
+
+    config A01NYUB_DEFAULT_TX_PIN
+        int "Default TX pin"
+        default 3
+        range 0 39
+
+    config A01NYUB_DEFAULT_MODE_FILTERED
+        bool "Use filtered mode by default"
+        default y
+        help
+            y = filtered/processed data (TX pin HIGH)
+            n = realtime raw data (TX pin LOW)
+
+    config A01NYUB_DEFAULT_READ_CONTINUOUS
+        bool "Use continuous mode by default"
+        default y
+        help
+            y = continuous non-blocking reading
+            n = one-shot blocking reading
+
+endmenu
