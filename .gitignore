@@ -76,3 +76,12 @@ Desktop.ini
 *.workspace # General workspace files, can be from various tools
 *.suo       # Visual Studio Solution User Options
 *.sln.docstates # Visual Studio
+.vscode
+
+# Doxygen generated documentation
+firmware/esp32/docs/
+
+# Local documentation files and datasheets
+*.pdf
+*.png
+*.jpg
