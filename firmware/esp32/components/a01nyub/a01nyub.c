@@ -62,8 +62,10 @@ static esp_err_t read_packet(a01nyub_t *dev, uint16_t *value)
  *
  * Runs forever, calling @ref read_packet in a loop. On each successful
  * read it acquires the mutex, updates @c last_value, sets
- * @c A01NYUB_FLAG_VALID, and clears @c A01NYUB_FLAG_ERROR. Used only when
- * @c read_mode is @c A01NYUB_READ_CONTINUOUS.
+ * @c A01NYUB_FLAG_VALID, and clears @c A01NYUB_FLAG_ERROR. On a failed
+ * read it acquires the mutex and sets @c A01NYUB_FLAG_ERROR, leaving any
+ * previously cached @c last_value in place. Used only when @c read_mode
+ * is @c A01NYUB_READ_CONTINUOUS.
  *
  * @param arg  Pointer to the owning @ref a01nyub_t instance.
  */
@@ -74,13 +76,15 @@ static void reader_task(void *arg)
 
     while (true) {
         esp_err_t ret = read_packet(dev, &value);
+        xSemaphoreTake(dev->mutex, portMAX_DELAY);
         if (ret == ESP_OK) {
-            xSemaphoreTake(dev->mutex, portMAX_DELAY);
             dev->last_value = value;
             dev->flags |= A01NYUB_FLAG_VALID;
             dev->flags &= ~A01NYUB_FLAG_ERROR;
-            xSemaphoreGive(dev->mutex);
+        } else {
+            dev->flags |= A01NYUB_FLAG_ERROR;
         }
+        xSemaphoreGive(dev->mutex);
     }
 }
 
@@ -90,7 +94,7 @@ esp_err_t a01nyub_init(a01nyub_t *dev)
     if (dev->flags & A01NYUB_FLAG_INITIALIZED) return ESP_ERR_INVALID_STATE;
 
     esp_err_t ret = uart_driver_install(dev->uart_port, 256, 0, 0, NULL, 0);
-    if (ret != ESP_OK) goto err;
+    if (ret != ESP_OK) return ret;
 
     uart_config_t uart_config = {
         .baud_rate = 9600,
@@ -102,12 +106,12 @@ esp_err_t a01nyub_init(a01nyub_t *dev)
     };
 
     ret = uart_param_config(dev->uart_port, &uart_config);
-    if (ret != ESP_OK) goto err;
+    if (ret != ESP_OK) goto err_uart;
 
     ret = uart_set_pin(dev->uart_port, UART_PIN_NO_CHANGE, dev->rx_pin,
                        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE,
                        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    if (ret != ESP_OK) goto err;
+    if (ret != ESP_OK) goto err_uart;
 
     /* The TX pin doubles as a mode-select line for the sensor:
      * HIGH = filtered output, LOW = real-time output. */
@@ -120,19 +124,18 @@ esp_err_t a01nyub_init(a01nyub_t *dev)
     };
 
     ret = gpio_config(&io);
-    if (ret != ESP_OK) goto err;
+    if (ret != ESP_OK) goto err_uart;
 
     gpio_set_level(dev->tx_pin, dev->mode == A01NYUB_MODE_FILTERED ? 1 : 0);
 
-    if (dev->read_mode == A01NYUB_READ_CONTINUOUS) {
-        dev->mutex = xSemaphoreCreateMutex();
-        if (!dev->mutex) { ret = ESP_ERR_NO_MEM; goto err; }
+    dev->mutex = xSemaphoreCreateMutex();
+    if (!dev->mutex) { ret = ESP_ERR_NO_MEM; goto err_gpio; }
 
+    if (dev->read_mode == A01NYUB_READ_CONTINUOUS) {
         BaseType_t t = xTaskCreate(reader_task, "a01nyub", 2048, dev, 5, &dev->task);
         if (t != pdPASS) {
-            vSemaphoreDelete(dev->mutex);
             ret = ESP_ERR_NO_MEM;
-            goto err;
+            goto err_mutex;
         }
     }
 
@@ -143,7 +146,12 @@ esp_err_t a01nyub_init(a01nyub_t *dev)
              dev->read_mode == A01NYUB_READ_CONTINUOUS ? "continuous" : "oneshot");
     return ESP_OK;
 
-err:
+err_mutex:
+    vSemaphoreDelete(dev->mutex);
+    dev->mutex = NULL;
+err_gpio:
+    gpio_reset_pin(dev->tx_pin);
+err_uart:
     uart_driver_delete(dev->uart_port);
     return ret;
 }
@@ -154,6 +162,12 @@ esp_err_t a01nyub_get_data(a01nyub_t *dev, uint16_t *value)
     if (!(dev->flags & A01NYUB_FLAG_INITIALIZED)) return ESP_ERR_INVALID_STATE;
 
     if (dev->read_mode == A01NYUB_READ_ONESHOT) {
+        /* Hold the mutex across the UART transaction itself, not just the
+         * state update: read_packet() issues multiple uart_read_bytes()
+         * calls, and concurrent callers sharing one UART port would
+         * otherwise interleave their byte reads and corrupt each other's
+         * packets. */
+        xSemaphoreTake(dev->mutex, portMAX_DELAY);
         esp_err_t ret = read_packet(dev, value);
         if (ret == ESP_OK) {
             dev->last_value = *value;
@@ -162,6 +176,7 @@ esp_err_t a01nyub_get_data(a01nyub_t *dev, uint16_t *value)
         } else {
             dev->flags |= A01NYUB_FLAG_ERROR;
         }
+        xSemaphoreGive(dev->mutex);
         return ret;
     }
 
