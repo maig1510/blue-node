@@ -4,18 +4,33 @@
 #include "esp_system.h"
 #include "driver/gpio.h"
 #include "nvs_flash.h"
-#include "esp_mac.h"
 
 #include "a01nyub.h"
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
+#include "node_protocol.h"
 
 #define TAG "MAIN"
 
 // Set URL of development MQTT broker
 #define MQTT_BROKER_URI "mqtt://192.168.100.129:1883"
 
+#define MEASUREMENT_INTERVAL_MS 1000
+
 static a01nyub_t s_sensor;
+
+/* Placeholder: settings arrive here (e.g. {"interval_ms":2000}) once the
+ * config handling lands. Runs on the mqtt event task — keep it short. */
+static void on_config(const char *json, int len, void *user_ctx)
+{
+    ESP_LOGI(TAG, "Config received: %.*s", len, json);
+}
+
+/* Placeholder: one-shot actions arrive here (e.g. {"cmd":"restart"}). */
+static void on_command(const char *json, int len, void *user_ctx)
+{
+    ESP_LOGI(TAG, "Command received: %.*s", len, json);
+}
 
 void app_main(void)
 {
@@ -40,15 +55,19 @@ void app_main(void)
         ESP_LOGE(TAG, "WiFi connection failed");
     }
 
-    char topic[48];
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    snprintf(topic, sizeof(topic), "blue-node/%02X%02X%02X/distance",
-             mac[3], mac[4], mac[5]);
+    /* Before mqtt_manager_init(): the state topic built here is what the client
+     * needs as its Last Will topic. */
+    node_protocol_config_t proto_cfg = {
+        .on_config  = on_config,
+        .on_command = on_command,
+    };
+    ESP_ERROR_CHECK(node_protocol_init(&proto_cfg));
 
     mqtt_manager_config_t mqtt_cfg = {
         .broker_uri = MQTT_BROKER_URI,
     };
+    node_protocol_apply_lwt(&mqtt_cfg);
+
     ESP_ERROR_CHECK(mqtt_manager_init(&mqtt_cfg));
     ESP_ERROR_CHECK(mqtt_manager_start());
 
@@ -69,15 +88,13 @@ void app_main(void)
         if (ret == ESP_OK) {
             ESP_LOGI(TAG, "Distance: %d mm  (%.1f cm)", distance, distance / 10.0f);
 
-            if (mqtt_manager_is_connected()) {
-                char payload[8];
-                int len = snprintf(payload, sizeof(payload), "%u", distance);
-                mqtt_manager_publish(topic, payload, len, 0, 0);
-            }
+            char payload[32];
+            int len = snprintf(payload, sizeof(payload), "{\"distance_mm\":%u}", distance);
+            node_protocol_publish_telemetry(payload, len);
         } else if (ret == ESP_ERR_INVALID_STATE) {
             ESP_LOGW(TAG, "Waiting for first reading...");
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(MEASUREMENT_INTERVAL_MS));
     }
 }

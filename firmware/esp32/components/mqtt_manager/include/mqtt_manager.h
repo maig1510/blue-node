@@ -19,6 +19,9 @@
 /** Maximum number of independent components that can register a data callback. */
 #define MQTT_MANAGER_MAX_DATA_HANDLERS 4
 
+/** Maximum number of independent components that can register a connection callback. */
+#define MQTT_MANAGER_MAX_CONN_HANDLERS 4
+
 /**
  * @brief Callback invoked for every incoming MQTT_EVENT_DATA message.
  *
@@ -45,6 +48,25 @@
 typedef void (*mqtt_manager_data_cb_t)(const char *topic, int topic_len,
                                         const char *data, int data_len,
                                         void *user_ctx);
+
+/**
+ * @brief Callback invoked whenever the broker session comes up or goes down.
+ *
+ * Called synchronously, from the esp-mqtt client's internal event task, on
+ * MQTT_EVENT_CONNECTED (@p connected true) and MQTT_EVENT_DISCONNECTED
+ * (@p connected false), once per registered handler. Fires on every reconnect,
+ * not just the first connection — subscriptions do not survive a clean-session
+ * reconnect, so re-subscribing from here is the intended pattern.
+ *
+ * mqtt_manager_is_connected() already reflects the new state by the time this
+ * runs, so a handler may call mqtt_manager_publish() / _subscribe() directly.
+ * Keep the handler fast: it runs on the mqtt task and blocks delivery of
+ * subsequent events while it executes.
+ *
+ * @param[in] connected  true on connect, false on disconnect.
+ * @param[in] user_ctx   Opaque context passed to mqtt_manager_register_connection_handler().
+ */
+typedef void (*mqtt_manager_conn_cb_t)(bool connected, void *user_ctx);
 
 /**
  * @brief Configuration passed to mqtt_manager_init().
@@ -83,6 +105,20 @@ typedef struct {
                                     correct). 0 lets esp-mqtt treat ca_cert_pem as
                                     a plain NUL-terminated string instead. Ignored
                                     if ca_cert_pem is NULL. */
+    const char *lwt_topic;    /**< Optional Last Will and Testament topic. The broker
+                                    publishes lwt_msg here if the client drops without
+                                    a clean disconnect (power loss, lost network),
+                                    which is what lets subscribers distinguish a dead
+                                    device from an idle one. NULL disables LWT, and
+                                    then every other lwt_* field is ignored. */
+    const char *lwt_msg;      /**< LWT payload. Like the fields above, this is handed
+                                    to esp-mqtt uncopied and must outlive the client. */
+    int         lwt_msg_len;  /**< Length of lwt_msg in bytes. 0 lets esp-mqtt compute
+                                    it with strlen(lwt_msg) — only valid if lwt_msg is
+                                    NUL-terminated. */
+    int         lwt_qos;      /**< LWT QoS level: 0, 1, or 2. */
+    int         lwt_retain;   /**< Non-zero to set the MQTT retain flag on the LWT
+                                    message, so late subscribers still see it. */
 } mqtt_manager_config_t;
 
 /**
@@ -215,13 +251,30 @@ esp_err_t mqtt_manager_unsubscribe(const char *topic);
 bool mqtt_manager_is_connected(void);
 
 /**
+ * @brief Return whether the client is started, regardless of session state.
+ *
+ * True between a successful mqtt_manager_start() and mqtt_manager_stop(). This
+ * is a different question from mqtt_manager_is_connected(): a started client
+ * that has lost its session is still running its event task and may invoke
+ * registered handlers at any moment, which is what makes this the right check
+ * before tearing down anything those handlers touch.
+ *
+ * @return true   Started (start() succeeded, no stop() since).
+ * @return false  Not started, or mqtt_manager_init() has never been called.
+ */
+bool mqtt_manager_is_started(void);
+
+/**
  * @brief Register a callback to receive incoming MQTT_EVENT_DATA messages.
  *
  * Up to MQTT_MANAGER_MAX_DATA_HANDLERS callbacks may be registered
  * simultaneously (e.g. one per subscribing component); every registered
  * callback is invoked for every incoming message regardless of topic, so
- * each handler is responsible for filtering by topic if needed. Not
- * thread-safe against concurrent register/unregister calls.
+ * each handler is responsible for filtering by topic if needed.
+ *
+ * The handler table is read by the mqtt event task without a lock, so mutate
+ * it only while that task cannot be dispatching: register before
+ * mqtt_manager_start() and unregister only after mqtt_manager_stop().
  *
  * @param[in] cb        Callback to invoke. Must not be NULL.
  * @param[in] user_ctx  Opaque pointer passed back to @p cb on every call.
@@ -242,3 +295,36 @@ esp_err_t mqtt_manager_register_data_handler(mqtt_manager_data_cb_t cb, void *us
  * @return ESP_ERR_NOT_FOUND      @p cb was not registered.
  */
 esp_err_t mqtt_manager_unregister_data_handler(mqtt_manager_data_cb_t cb);
+
+/**
+ * @brief Register a callback to be notified of connect/disconnect transitions.
+ *
+ * Up to MQTT_MANAGER_MAX_CONN_HANDLERS callbacks may be registered
+ * simultaneously; every registered callback is invoked on every transition, in
+ * registration order. May be called before mqtt_manager_init(), which is the
+ * usual ordering when the handler's own state (e.g. topic strings) has to exist
+ * before the client is configured.
+ *
+ * The handler table is read by the mqtt event task without a lock, so mutate
+ * it only while that task cannot be dispatching: register before
+ * mqtt_manager_start() and unregister only after mqtt_manager_stop().
+ *
+ * @param[in] cb        Callback to invoke. Must not be NULL.
+ * @param[in] user_ctx  Opaque pointer passed back to @p cb on every call.
+ *
+ * @return ESP_OK               Callback registered.
+ * @return ESP_ERR_INVALID_ARG  @p cb is NULL.
+ * @return ESP_ERR_NO_MEM       All MQTT_MANAGER_MAX_CONN_HANDLERS slots are in use.
+ */
+esp_err_t mqtt_manager_register_connection_handler(mqtt_manager_conn_cb_t cb, void *user_ctx);
+
+/**
+ * @brief Unregister a previously registered connection callback.
+ *
+ * @param[in] cb  Callback previously passed to mqtt_manager_register_connection_handler().
+ *
+ * @return ESP_OK                 Callback removed.
+ * @return ESP_ERR_INVALID_ARG    @p cb is NULL.
+ * @return ESP_ERR_NOT_FOUND      @p cb was not registered.
+ */
+esp_err_t mqtt_manager_unregister_connection_handler(mqtt_manager_conn_cb_t cb);

@@ -30,7 +30,26 @@ static struct {
         mqtt_manager_data_cb_t cb;
         void                   *user_ctx;
     } handlers[MQTT_MANAGER_MAX_DATA_HANDLERS];
+    struct {
+        mqtt_manager_conn_cb_t cb;
+        void                   *user_ctx;
+    } conn_handlers[MQTT_MANAGER_MAX_CONN_HANDLERS];
 } s_ctx = {0};
+
+/**
+ * @brief Notify every registered connection handler of a state transition.
+ *
+ * Called only after s_ctx.connected has been updated, so handlers observe the
+ * new state through mqtt_manager_is_connected() and may publish or subscribe.
+ */
+static void notify_connection_handlers(bool connected)
+{
+    for (int i = 0; i < MQTT_MANAGER_MAX_CONN_HANDLERS; i++) {
+        if (s_ctx.conn_handlers[i].cb) {
+            s_ctx.conn_handlers[i].cb(connected, s_ctx.conn_handlers[i].user_ctx);
+        }
+    }
+}
 
 /**
  * @brief esp-mqtt event callback, registered for every event ID.
@@ -46,11 +65,13 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_i
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "Connected to broker");
         s_ctx.connected = true;
+        notify_connection_handlers(true);
         break;
 
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "Disconnected from broker");
         s_ctx.connected = false;
+        notify_connection_handlers(false);
         break;
 
     case MQTT_EVENT_DATA:
@@ -110,6 +131,14 @@ esp_err_t mqtt_manager_init(const mqtt_manager_config_t *config)
     if (config->ca_cert_pem) {
         mqtt_cfg.broker.verification.certificate = config->ca_cert_pem;
         mqtt_cfg.broker.verification.certificate_len = config->ca_cert_len;
+    }
+
+    if (config->lwt_topic) {
+        mqtt_cfg.session.last_will.topic   = config->lwt_topic;
+        mqtt_cfg.session.last_will.msg     = config->lwt_msg;
+        mqtt_cfg.session.last_will.msg_len = config->lwt_msg_len;
+        mqtt_cfg.session.last_will.qos     = config->lwt_qos;
+        mqtt_cfg.session.last_will.retain  = config->lwt_retain;
     }
 
     s_ctx.client = esp_mqtt_client_init(&mqtt_cfg);
@@ -198,6 +227,11 @@ bool mqtt_manager_is_connected(void)
     return s_ctx.connected;
 }
 
+bool mqtt_manager_is_started(void)
+{
+    return s_ctx.started;
+}
+
 esp_err_t mqtt_manager_register_data_handler(mqtt_manager_data_cb_t cb, void *user_ctx)
 {
     ESP_RETURN_ON_FALSE(cb, ESP_ERR_INVALID_ARG, TAG, "cb is NULL");
@@ -222,6 +256,37 @@ esp_err_t mqtt_manager_unregister_data_handler(mqtt_manager_data_cb_t cb)
         if (s_ctx.handlers[i].cb == cb) {
             s_ctx.handlers[i].cb = NULL;
             s_ctx.handlers[i].user_ctx = NULL;
+            return ESP_OK;
+        }
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t mqtt_manager_register_connection_handler(mqtt_manager_conn_cb_t cb, void *user_ctx)
+{
+    ESP_RETURN_ON_FALSE(cb, ESP_ERR_INVALID_ARG, TAG, "cb is NULL");
+
+    for (int i = 0; i < MQTT_MANAGER_MAX_CONN_HANDLERS; i++) {
+        if (!s_ctx.conn_handlers[i].cb) {
+            s_ctx.conn_handlers[i].cb = cb;
+            s_ctx.conn_handlers[i].user_ctx = user_ctx;
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGE(TAG, "No free connection handler slots (max %d)", MQTT_MANAGER_MAX_CONN_HANDLERS);
+    return ESP_ERR_NO_MEM;
+}
+
+esp_err_t mqtt_manager_unregister_connection_handler(mqtt_manager_conn_cb_t cb)
+{
+    ESP_RETURN_ON_FALSE(cb, ESP_ERR_INVALID_ARG, TAG, "cb is NULL");
+
+    for (int i = 0; i < MQTT_MANAGER_MAX_CONN_HANDLERS; i++) {
+        if (s_ctx.conn_handlers[i].cb == cb) {
+            s_ctx.conn_handlers[i].cb = NULL;
+            s_ctx.conn_handlers[i].user_ctx = NULL;
             return ESP_OK;
         }
     }
