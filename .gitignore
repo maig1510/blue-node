@@ -16,6 +16,9 @@
 # Log files
 *.log
 
+# Database files
+*.db
+
 # Build artifacts and directories
 **/build/
 build/
