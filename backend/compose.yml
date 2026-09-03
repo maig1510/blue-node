@@ -9,6 +9,10 @@ services:
       - "9001:9001"
 
     volumes:
-      - ./mosquitto/config:/mosquitto/config:Z
-      - ./mosquitto/data:/mosquitto/data:Z
-      - ./mosquitto/log:/mosquitto/log:Z
+      - ./infra/mosquitto:/mosquitto/config:ro,Z
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
