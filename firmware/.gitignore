@@ -1,0 +1,48 @@
+# ESP-IDF firmware.
+# Note: dependencies.lock is deliberately TRACKED - it is what lets
+# `idf.py build` refetch managed_components/ on a fresh clone.
+
+# Build output
+build/
+build_esp32*/
+
+# Project configuration.
+# sdkconfig is generated; sdkconfig.defaults is tracked and carries the
+# real settings (ESP32-C6 target, partition table, component Kconfig).
+sdkconfig
+sdkconfig.old
+
+# Component manager
+managed_components/
+# Older / manual component management
+/components/.idf/
+**/components/.idf/
+# ESP-IDF tools installed or referenced locally to the project
+.espressif/
+
+# Flash artifacts
+*.bin
+*.elf
+*.map
+flasher_args.json
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# Language servers.
+# Trailing slash matters: it ignores the cache dir, not the tracked
+# esp32/.clangd config file.
+.clangd/
+.ccls-cache/
+compile_commands.json
+
+# Doxygen output (generated from esp32/Doxyfile)
+esp32/docs/
+
+# idf-ci artifacts
+app_info_*.txt
+size_info_*.txt

@@ -1,0 +1,34 @@
+# KiCad
+# Format documentation: https://kicad-pcb.org/help/file-formats/
+
+# Backups and autosaves
+*-backups/
+_autosave-*
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*.sch-bak
+*-save.pro
+*-save.kicad_pcb
+*.000
+*.bck
+
+# Per-user project-local UI state (window layout, last-opened, etc.)
+*.kicad_prl
+
+# Footprint cache
+fp-info-cache
+
+# Netlists exported from Eeschema
+*.net
+
+# Autorouter files exported from Pcbnew
+*.dsn
+*.ses
+
+# Fabrication output
+gerbers/
+*.gbr
+*.drl
+
+# VSCode Local History extension
+.history/
