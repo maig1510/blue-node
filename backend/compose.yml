@@ -1,8 +1,13 @@
+name: blue-node
+
 services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mosquitto
     restart: unless-stopped
+
+    networks:
+      - bluenet
 
     ports:
       - "1883:1883"
@@ -13,6 +18,75 @@ services:
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
 
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: timescaledb
+    restart: unless-stopped
+
+    networks:
+      - bluenet
+
+    environment:
+      POSTGRES_DB: bluenode
+      POSTGRES_USER: blue
+      POSTGRES_PASSWORD: blue
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      # init.sql runs only on the first boot of an empty volume.
+      - ./infra/timescale:/docker-entrypoint-initdb.d:ro,Z
+
+  ingest:
+    build: ./ingest
+    container_name: ingest
+    restart: unless-stopped
+
+    networks:
+      - bluenet
+
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: "blue-node/+/telemetry"
+      PG_DSN: postgresql://blue:blue@timescaledb:5432/bluenode
+
+    depends_on:
+      - timescaledb
+      - mosquitto
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: unless-stopped
+
+    networks:
+      - bluenet
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+
+    ports:
+      - "5050:80"
+
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./infra/pgadmin/servers.json:/pgadmin4/servers.json:ro,Z
+
+    depends_on:
+      - timescaledb
+
+networks:
+  bluenet:
+    driver: bridge
+
 volumes:
   mosquitto_data:
   mosquitto_log:
+  timescale_data:
+  pgadmin_data:

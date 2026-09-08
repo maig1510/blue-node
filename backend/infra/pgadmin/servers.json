@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "blue-node timescale",
+      "Group": "Servers",
+      "Host": "timescaledb",
+      "Port": 5432,
+      "MaintenanceDB": "bluenode",
+      "Username": "blue",
+      "SSLMode": "prefer",
+      "Comment": "Local test stack. Password: blue"
+    }
+  }
+}
