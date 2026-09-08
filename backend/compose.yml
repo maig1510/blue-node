@@ -57,6 +57,23 @@ services:
       - timescaledb
       - mosquitto
 
+  api:
+    build: ./api
+    container_name: api
+    restart: unless-stopped
+
+    networks:
+      - bluenet
+
+    environment:
+      PG_DSN: postgresql://blue:blue@timescaledb:5432/bluenode
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      - timescaledb
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
