@@ -11,6 +11,7 @@
 
 #include "node_protocol.h"
 
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -19,10 +20,11 @@
 
 static const char *TAG = "NODE_PROTOCOL";
 
-/* Payloads for the two states this component publishes itself. Both are static
- * so the offline one can be handed to esp-mqtt as a Last Will, which keeps a
- * pointer to it for the lifetime of the client. */
-static const char PAYLOAD_ONLINE[]  = "{\"status\":\"online\"}";
+/* The offline payload is what the broker publishes on the device's behalf, so
+ * it has to be a fixed string: esp-mqtt keeps this pointer for the lifetime of
+ * the client, and the device is by definition not around to fill anything in.
+ * The online payload carries the MAC and firmware version and is built once in
+ * init() - see the state payload contract in node_protocol.h. */
 static const char PAYLOAD_OFFLINE[] = "{\"status\":\"offline\"}";
 
 /** Suffix per node_topic_t, indexed by category. */
@@ -39,7 +41,13 @@ static const char *const TOPIC_SUFFIX[NODE_TOPIC_COUNT] = {
  */
 static struct {
     char  device_id[NODE_PROTOCOL_DEVICE_ID_SIZE];
+    char  mac_str[NODE_PROTOCOL_MAC_STR_SIZE];
     char  topics[NODE_TOPIC_COUNT][NODE_PROTOCOL_TOPIC_SIZE];
+    /* Built once in init() and only read afterwards, like the topics: the
+     * component's lock-free threading model (see node_protocol.h) rests on
+     * nothing here changing once the mqtt event task exists. */
+    char  online_payload[NODE_PROTOCOL_STATE_PAYLOAD_SIZE];
+    int   online_payload_len;
     bool  initialized;
     node_protocol_msg_cb_t       on_config;
     node_protocol_msg_cb_t       on_command;
@@ -102,7 +110,7 @@ static void on_mqtt_connection(bool connected, void *user_ctx)
         return;
     }
 
-    esp_err_t ret = node_protocol_publish_state(PAYLOAD_ONLINE, sizeof(PAYLOAD_ONLINE) - 1);
+    esp_err_t ret = node_protocol_publish_state(s_ctx.online_payload, s_ctx.online_payload_len);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to publish online state: %s", esp_err_to_name(ret));
     }
@@ -150,10 +158,26 @@ esp_err_t node_protocol_init(const node_protocol_config_t *config)
     const char *root = config->root ? config->root : NODE_PROTOCOL_ROOT_DEFAULT;
 
     /* The low three bytes of the MAC are unique enough within one deployment
-     * and keep the topic short; the full MAC stays available for provisioning. */
+     * and keep the topic short; the full MAC goes out in the state message, so
+     * the backend can identify the board itself. */
     uint8_t mac[6];
     ESP_RETURN_ON_ERROR(esp_read_mac(mac, ESP_MAC_WIFI_STA), TAG, "esp_read_mac failed");
     snprintf(s_ctx.device_id, sizeof(s_ctx.device_id), "%02X%02X%02X", mac[3], mac[4], mac[5]);
+    snprintf(s_ctx.mac_str, sizeof(s_ctx.mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    /* Built here rather than per connect: it never changes, and on_mqtt_connection()
+     * runs on the mqtt event task where the less work the better. */
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    int payload_len = snprintf(s_ctx.online_payload, sizeof(s_ctx.online_payload),
+                               "{\"status\":\"online\",\"mac\":\"%s\",\"fw\":\"%s\"}",
+                               s_ctx.mac_str, app_desc->version);
+    /* A truncated payload is invalid JSON the backend would drop on every
+     * connect, so refuse to come up instead. */
+    ESP_RETURN_ON_FALSE(payload_len > 0 && payload_len < (int)sizeof(s_ctx.online_payload),
+                        ESP_ERR_INVALID_SIZE, TAG, "firmware version '%s' is too long",
+                        app_desc->version);
+    s_ctx.online_payload_len = payload_len;
 
     for (int i = 0; i < NODE_TOPIC_COUNT; i++) {
         int written = snprintf(s_ctx.topics[i], NODE_PROTOCOL_TOPIC_SIZE, "%s/%s/%s",
@@ -178,8 +202,8 @@ esp_err_t node_protocol_init(const node_protocol_config_t *config)
     }
 
     s_ctx.initialized = true;
-    ESP_LOGI(TAG, "Device %s, topics %s/%s/{telemetry,state,config,command}",
-             s_ctx.device_id, root, s_ctx.device_id);
+    ESP_LOGI(TAG, "Device %s (%s) fw %s, topics %s/%s/{telemetry,state,config,command}",
+             s_ctx.device_id, s_ctx.mac_str, app_desc->version, root, s_ctx.device_id);
     return ESP_OK;
 }
 
@@ -204,6 +228,11 @@ void node_protocol_apply_lwt(mqtt_manager_config_t *mqtt_cfg)
 const char *node_protocol_device_id(void)
 {
     return s_ctx.initialized ? s_ctx.device_id : EMPTY;
+}
+
+const char *node_protocol_mac(void)
+{
+    return s_ctx.initialized ? s_ctx.mac_str : EMPTY;
 }
 
 const char *node_protocol_topic(node_topic_t category)

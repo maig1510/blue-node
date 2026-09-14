@@ -37,6 +37,27 @@
  * node_protocol_apply_lwt() if the device disappears without disconnecting
  * cleanly.
  *
+ * @section state_payload State payload contract
+ *
+ * The backend registers devices from these two messages, so their shape is an
+ * interface, not an implementation detail:
+ *
+ *     online:  {"status":"online","mac":"AA:BB:CC:DD:EE:FF","fw":"1.0.0"}
+ *     offline: {"status":"offline"}
+ *
+ * The online message carries the full MAC because the topic only contains its
+ * low three bytes; it is what identifies the physical board for provisioning.
+ * "fw" is the application version from the app descriptor (see
+ * esp_app_get_description()), i.e. whatever the project version is set to.
+ *
+ * The offline message is published by the *broker*, not the device, so it can
+ * only be a fixed string agreed on in advance - no MAC, no version. The
+ * subscriber already knows which device it refers to from the topic.
+ *
+ * Both are retained, so a late subscriber always sees the last one.
+ * node_protocol_publish_state() may add fields on top of this; keep "status"
+ * in anything it publishes.
+ *
  * @section threading Threading model
  *
  * Two tasks reach into this component: the application task that publishes
@@ -80,8 +101,19 @@
 /** Size of the device id string, including the terminating NUL. */
 #define NODE_PROTOCOL_DEVICE_ID_SIZE 7
 
+/** Size of the MAC address string "AA:BB:CC:DD:EE:FF", including the terminating NUL. */
+#define NODE_PROTOCOL_MAC_STR_SIZE 18
+
 /** Size of the buffer each topic is built into, including the terminating NUL. */
 #define NODE_PROTOCOL_TOPIC_SIZE 64
+
+/**
+ * @brief Size of the buffer the online state payload is built into.
+ *
+ * Fits @ref state_payload plus a firmware version of up to
+ * CONFIG_APP_PROJECT_VER_LEN (32) characters, with room to spare.
+ */
+#define NODE_PROTOCOL_STATE_PAYLOAD_SIZE 128
 
 /**
  * @brief The four topic categories of the blue-node contract.
@@ -204,6 +236,18 @@ void node_protocol_apply_lwt(mqtt_manager_config_t *mqtt_cfg);
  *         An empty string if node_protocol_init() has not been called.
  */
 const char *node_protocol_device_id(void);
+
+/**
+ * @brief Return the full WiFi station MAC as "AA:BB:CC:DD:EE:FF".
+ *
+ * The device id is only the low three bytes of this; the full address is what
+ * identifies the board itself, and is what the online state message carries to
+ * the backend (see @ref state_payload).
+ *
+ * @return Pointer to this component's copy, valid until node_protocol_deinit().
+ *         An empty string if node_protocol_init() has not been called.
+ */
+const char *node_protocol_mac(void);
 
 /**
  * @brief Return the fully-qualified topic for one category.

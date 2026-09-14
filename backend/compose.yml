@@ -50,7 +50,9 @@ services:
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
-      MQTT_TOPIC: "blue-node/+/telemetry"
+      MQTT_TELEMETRY_TOPIC: "blue-node/+/telemetry"
+      MQTT_STATE_TOPIC: "blue-node/+/state"
+      LAST_SEEN_INTERVAL_S: "30"
       PG_DSN: postgresql://blue:blue@timescaledb:5432/bluenode
 
     depends_on:
