@@ -4,8 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-import tank_level
-from tank_level import Shape
+import calculators
+from calculators import Shape
 
 
 class Device(BaseModel):
@@ -72,7 +72,7 @@ class TankCreate(BaseModel):
     @model_validator(mode="after")
     def check_dimensions(self):
         """dimensions has to carry the measurements this shape needs."""
-        tank_level.validate_dimensions(self.shape, self.dimensions)
+        calculators.validate_dimensions(self.shape, self.dimensions)
         return self
 
 

@@ -26,8 +26,8 @@ from fastapi.responses import JSONResponse
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
+import calculators
 import db
-import tank_level
 from models import (
     Device,
     DeviceUpdate,
@@ -251,7 +251,7 @@ def update_tank(tank_id: int, update: TankUpdate):
             shape = fields.get("shape", tank["shape"])
             dimensions = fields.get("dimensions", tank["dimensions"])
             try:
-                tank_level.validate_dimensions(shape, dimensions)
+                calculators.validate_dimensions(shape, dimensions)
             except ValidationError as exc:
                 raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
@@ -304,10 +304,10 @@ def tank_level_now(tank_id: int):
                     status_code=404, detail=f"tank {tank_id} has no distance reading yet"
                 )
 
-            level = tank_level.compute(
-                height_cm=float(tank["height_cm"]),
-                shape=tank["shape"],
-                dimensions=tank["dimensions"],
+            calculator = calculators.get(
+                tank["shape"], float(tank["height_cm"]), tank["dimensions"]
+            )
+            level = calculator.level(
                 distance_mm=row["distance_mm"],
                 sensor_offset_mm=row["sensor_offset_mm"],
             )

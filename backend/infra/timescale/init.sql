@@ -17,8 +17,8 @@ $$ LANGUAGE plpgsql;
 -- supporting another shape does not mean another column.
 --
 -- Units: everything here is centimetres, while telemetry is millimetres. The
--- conversion happens in exactly one place, api/tank_level.py - hence the unit
--- suffix on every name.
+-- conversion happens in exactly one place, the api/calculators/ package -
+-- hence the unit suffix on every name.
 --
 -- Created before devices, which references it.
 CREATE TABLE tanks (
@@ -32,10 +32,15 @@ CREATE TABLE tanks (
 
     -- The API validates dimensions against the shape with Pydantic, but
     -- pgAdmin goes straight to the table. This is the backstop that keeps a
-    -- box from carrying a cylinder's measurements.
+    -- box from carrying a cylinder's measurements. Kept in step with the shape
+    -- modules in api/calculators/.
+    --
+    -- triangle_height_cm is the altitude of the triangular FOOTPRINT, not the
+    -- tank's own height_cm above - see calculators/triangular.py.
     CONSTRAINT tanks_shape_dimensions CHECK (
-        (shape = 'cylinder' AND dimensions ? 'diameter_cm') OR
-        (shape = 'box'      AND dimensions ?& array['width_cm', 'depth_cm'])
+        (shape = 'cylinder'    AND dimensions ? 'diameter_cm') OR
+        (shape = 'rectangular' AND dimensions ?& array['width_cm', 'depth_cm']) OR
+        (shape = 'triangular'  AND dimensions ?& array['base_cm', 'triangle_height_cm'])
     )
 );
 
