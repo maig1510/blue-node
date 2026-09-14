@@ -6,6 +6,7 @@ import '../models/tank.dart';
 import '../models/tank_level.dart';
 import '../widgets/async_view.dart';
 import '../widgets/level_gauge.dart';
+import '../widgets/status_chip.dart';
 import 'tank_detail_screen.dart';
 import 'tank_form_screen.dart';
 
@@ -145,10 +146,9 @@ class _TankTile extends StatelessWidget {
     final level = this.level;
 
     return Card(
-      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -156,56 +156,78 @@ class _TankTile extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  // The footprint icon says what shape this is, so the name
+                  // gets the whole line to itself.
+                  IconBadge(icon: tank.shapeInfo.icon),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      tank.name,
-                      style: theme.textTheme.titleMedium,
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tank.name,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          tank.shapeInfo.label,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  tankLevelChip(level),
+                ],
+              ),
+              const SizedBox(height: 14),
+              LevelBar(fraction: level?.fraction ?? 0),
+              const SizedBox(height: 8),
+              Row(
+                children: [
                   Text(
-                    tank.shapeInfo.label,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.outline,
+                    level == null ? '—' : '${level.percent.toStringAsFixed(1)} %',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    level == null
+                        ? ''
+                        : '${level.volumeL.toStringAsFixed(0)} / '
+                              '${level.capacityL.toStringAsFixed(0)} l',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              if (level == null)
-                Text(
-                  'Bez merania',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.outline,
-                  ),
-                )
-              else ...[
-                LevelBar(fraction: level.fraction),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Text(
-                      '${level.percent.toStringAsFixed(1)} %',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${level.volumeL.toStringAsFixed(0)} / '
-                      '${level.capacityL.toStringAsFixed(0)} l',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
             ],
           ),
         ),
       ),
     );
   }
+}
+
+/// The chip describing a tank's fill state.
+///
+/// Shared by the list and the detail screen so both call the same level "low".
+StatusChip tankLevelChip(TankLevel? level) {
+  if (level == null) {
+    return const StatusChip.neutral(
+      icon: Icons.help_outline,
+      label: 'Bez merania',
+    );
+  }
+  return level.isLow
+      ? const StatusChip.warning(
+          icon: Icons.warning_amber_rounded,
+          label: 'Nízka hladina',
+        )
+      : const StatusChip.good(icon: Icons.check_circle_outline, label: 'Dostatok');
 }

@@ -8,6 +8,8 @@
 /// screens: pick a shape, render its fields.
 library;
 
+import 'package:flutter/material.dart';
+
 /// One measurement a shape needs, as it appears in the tank's `dimensions` map.
 class DimensionField {
   const DimensionField(this.key, this.label, {this.hint});
@@ -23,7 +25,7 @@ class DimensionField {
 }
 
 class TankShape {
-  const TankShape(this.value, this.label, this.fields);
+  const TankShape(this.value, this.label, this.icon, this.fields);
 
   /// The exact string stored in `tanks.shape` and accepted by the API.
   final String value;
@@ -31,18 +33,22 @@ class TankShape {
   /// Human label for the dropdown.
   final String label;
 
+  /// The tank's FOOTPRINT, which is what the shape actually describes: a
+  /// circle, a square or a triangle seen from above.
+  final IconData icon;
+
   final List<DimensionField> fields;
 
-  static const cylinder = TankShape('cylinder', 'Valec', [
+  static const cylinder = TankShape('cylinder', 'Valec', Icons.circle_outlined, [
     DimensionField('diameter_cm', 'Priemer'),
   ]);
 
-  static const rectangular = TankShape('rectangular', 'Kváder', [
+  static const rectangular = TankShape('rectangular', 'Kváder', Icons.crop_square, [
     DimensionField('width_cm', 'Šírka'),
     DimensionField('depth_cm', 'Hĺbka'),
   ]);
 
-  static const triangular = TankShape('triangular', 'Trojuholník', [
+  static const triangular = TankShape('triangular', 'Trojuholník', Icons.change_history, [
     DimensionField('base_cm', 'Základňa'),
     // Two different "heights" end up side by side in the form, so this one has
     // to say which it is: the altitude of the floor plan, not the tank's own

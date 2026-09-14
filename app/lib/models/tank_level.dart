@@ -28,8 +28,17 @@ class TankLevel {
   final double volumeL;
   final double capacityL;
 
+  /// Below this, the tank is reported as running low.
+  ///
+  /// One named number in one place: the list and the detail screen both decide
+  /// their status chip from it, so changing when a tank counts as "low" is a
+  /// one-line edit rather than a hunt through the screens.
+  static const lowPercentThreshold = 25.0;
+
   /// Fill fraction for progress indicators, 0.0-1.0.
   double get fraction => (percent / 100).clamp(0.0, 1.0);
+
+  bool get isLow => percent < lowPercentThreshold;
 
   factory TankLevel.fromJson(Map<String, dynamic> json) => TankLevel(
     tankId: json['tank_id'] as int,

@@ -5,6 +5,7 @@ import 'screens/devices_screen.dart';
 import 'screens/tanks_screen.dart';
 import 'state/device_store.dart';
 import 'state/tank_store.dart';
+import 'theme.dart';
 
 void main() {
   final api = ApiClient();
@@ -61,10 +62,11 @@ class BlueNodeApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'blue-node',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-      ),
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      // Follows the phone; both modes were checked against their own surface
+      // rather than one being an automatic flip of the other.
+      themeMode: ThemeMode.system,
       home: const HomeShell(),
     );
   }

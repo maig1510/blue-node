@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'status_chip.dart';
+
 /// The three states every list screen has to render besides its content:
 /// still loading, failed, or loaded but empty.
 class AsyncView extends StatelessWidget {
@@ -67,16 +69,17 @@ class _Message extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: theme.colorScheme.outline),
-            const SizedBox(height: 16),
+            IconBadge(icon: icon, size: 72),
+            const SizedBox(height: 20),
             Text(
               text,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.outline,
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.4,
               ),
             ),
-            if (action != null) ...[const SizedBox(height: 16), action!],
+            if (action != null) ...[const SizedBox(height: 20), action!],
           ],
         ),
       ),

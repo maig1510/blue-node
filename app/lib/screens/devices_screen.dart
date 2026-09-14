@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../models/device.dart';
 import '../widgets/async_view.dart';
+import '../widgets/status_chip.dart';
 import 'device_detail_screen.dart';
 
 /// Every node the ingest service has seen.
@@ -52,16 +53,16 @@ class DevicesScreen extends StatelessWidget {
                       : scope.tanks.byId(device.tankId!);
 
                   return ListTile(
-                    leading: Icon(
-                      Icons.circle,
-                      size: 12,
-                      color: device.isOnline
-                          ? Colors.green.shade600
-                          : Colors.amber.shade700,
-                    ),
+                    leading: const IconBadge(icon: Icons.sensors),
                     title: Text(device.label),
-                    subtitle: Text(_subtitle(device, tank?.name)),
-                    trailing: const Icon(Icons.chevron_right),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(_subtitle(device, tank?.name)),
+                    ),
+                    // The chip, not a coloured dot: the offline yellow is
+                    // unreadable at dot size on a light surface, and colour on
+                    // its own never says what it means.
+                    trailing: deviceStatusChip(device.isOnline),
                     onTap: () => Navigator.of(context).push<void>(
                       MaterialPageRoute(
                         builder: (_) => DeviceDetailScreen(deviceId: device.id),

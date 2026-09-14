@@ -5,8 +5,10 @@ import '../api/api_client.dart';
 import '../main.dart';
 import '../models/device.dart';
 import '../models/tank_level.dart';
+import '../theme.dart';
 import '../widgets/async_view.dart';
 import '../widgets/polling.dart';
+import '../widgets/status_chip.dart';
 
 /// One node: what it is, what it last measured, and the three things a human
 /// gets to decide about it.
@@ -117,12 +119,17 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
               _ReadingCard(reading: _reading, noReadings: _noReadings),
               const SizedBox(height: 24),
 
-              Text('Identita', style: Theme.of(context).textTheme.titleSmall),
+              Row(
+                children: [
+                  Text('Identita', style: Theme.of(context).textTheme.titleSmall),
+                  const Spacer(),
+                  deviceStatusChip(device.isOnline),
+                ],
+              ),
               const SizedBox(height: 8),
               _row(context, 'Node ID', device.nodeId),
               _row(context, 'MAC', device.macAddress ?? 'zatiaľ neohlásená'),
               _row(context, 'Firmvér', device.firmware ?? '—'),
-              _row(context, 'Stav', device.isOnline ? 'online' : 'offline'),
               _row(context, 'Naposledy', _formatDateTime(device.lastSeenAt)),
               _row(context, 'Registrované', _formatDateTime(device.createdAt)),
 
@@ -238,7 +245,9 @@ class _ReadingCard extends StatelessWidget {
                 reading?.distanceMm?.toString() ?? (noReadings ? '—' : '…'),
                 style: theme.textTheme.displayMedium?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
+                  // The water blue: this is a distance to a water surface, and
+                  // it is the one number this screen exists for.
+                  color: context.colors.water,
                 ),
               ),
               Text('mm', style: theme.textTheme.bodyMedium),

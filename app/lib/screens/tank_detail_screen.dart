@@ -7,8 +7,10 @@ import '../models/tank_level.dart';
 import '../widgets/async_view.dart';
 import '../widgets/level_gauge.dart';
 import '../widgets/polling.dart';
+import '../widgets/status_chip.dart';
 import 'device_detail_screen.dart';
 import 'tank_form_screen.dart';
+import 'tanks_screen.dart' show tankLevelChip;
 
 /// One tank, with its level refreshed while the screen is open.
 class TankDetailScreen extends StatefulWidget {
@@ -147,6 +149,10 @@ class _TankDetailScreenState extends State<TankDetailScreen>
                 ),
               const SizedBox(height: 8),
               Center(child: _buildLevel(context)),
+              if (_level != null) ...[
+                const SizedBox(height: 16),
+                Center(child: tankLevelChip(_level)),
+              ],
               const SizedBox(height: 24),
               _Section(
                 title: 'Nádrž',
@@ -184,14 +190,10 @@ class _TankDetailScreenState extends State<TankDetailScreen>
               else
                 for (final device in devices)
                   ListTile(
-                    leading: Icon(
-                      Icons.circle,
-                      size: 12,
-                      color: device.isOnline ? Colors.green.shade600 : Colors.amber.shade700,
-                    ),
+                    leading: const IconBadge(icon: Icons.sensors),
                     title: Text(device.label),
                     subtitle: Text('Posun senzora ${device.sensorOffsetMm} mm'),
-                    trailing: const Icon(Icons.chevron_right),
+                    trailing: deviceStatusChip(device.isOnline),
                     onTap: () => Navigator.of(context).push<void>(
                       MaterialPageRoute(
                         builder: (_) => DeviceDetailScreen(deviceId: device.id),
