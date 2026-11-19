@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../api/api_client.dart';
-import '../main.dart';
 import '../models/tank.dart';
 import '../models/tank_shape.dart';
+import '../state/device_store.dart';
+import '../state/tank_store.dart';
 import '../widgets/async_view.dart';
 
 /// Create or edit a tank.
@@ -53,7 +55,7 @@ class _TankFormScreenState extends State<TankFormScreen> {
       tank.dimensions.forEach((key, value) {
         _dimensions[key] = TextEditingController(text: _trim(value));
       });
-      _deviceId = AppScope.of(context).devices.forTank(tank.id).firstOrNull?.id;
+      _deviceId = context.read<DeviceStore>().forTank(tank.id).firstOrNull?.id;
     }
   }
 
@@ -74,7 +76,9 @@ class _TankFormScreenState extends State<TankFormScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _saving = true);
-    final scope = AppScope.of(context);
+    // Looked up before the first await: after it the screen may be gone.
+    final tanks = context.read<TankStore>();
+    final devices = context.read<DeviceStore>();
 
     // Only the fields of the selected shape: a leftover diameter_cm on a box
     // would be rejected by the API, which forbids unknown keys.
@@ -95,10 +99,10 @@ class _TankFormScreenState extends State<TankFormScreen> {
 
     try {
       final saved = _isEdit
-          ? await scope.tanks.update(widget.tank!.id, tank)
-          : await scope.tanks.create(tank);
+          ? await tanks.update(widget.tank!.id, tank)
+          : await tanks.create(tank);
 
-      await _applyDeviceAssignment(scope, saved.id);
+      await _applyDeviceAssignment(devices, saved.id);
 
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -114,16 +118,16 @@ class _TankFormScreenState extends State<TankFormScreen> {
   /// Saved separately from the tank, so this is the one place a half-success
   /// is possible: the tank exists but the sensor is not attached. That has to
   /// be said out loud rather than swallowed, hence its own try/catch.
-  Future<void> _applyDeviceAssignment(AppScope scope, int tankId) async {
-    final previous = scope.devices.forTank(tankId).firstOrNull?.id;
+  Future<void> _applyDeviceAssignment(DeviceStore devices, int tankId) async {
+    final previous = devices.forTank(tankId).firstOrNull?.id;
     if (previous == _deviceId) return;
 
     try {
       if (previous != null) {
-        await scope.devices.assignToTank(previous, null);
+        await devices.assignToTank(previous, null);
       }
       if (_deviceId != null) {
-        await scope.devices.assignToTank(_deviceId!, tankId);
+        await devices.assignToTank(_deviceId!, tankId);
       }
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -137,7 +141,9 @@ class _TankFormScreenState extends State<TankFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final devices = AppScope.of(context).devices.devices;
+    // watch: if the device list is still loading when the form opens, the
+    // sensor dropdown fills in once it arrives.
+    final devices = context.watch<DeviceStore>().devices;
 
     return Scaffold(
       appBar: AppBar(title: Text(_isEdit ? 'Upraviť nádrž' : 'Nová nádrž')),

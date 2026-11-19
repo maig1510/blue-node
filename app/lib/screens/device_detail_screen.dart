@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../api/api_client.dart';
-import '../main.dart';
 import '../models/device.dart';
 import '../models/tank_level.dart';
+import '../state/device_store.dart';
+import '../state/tank_store.dart';
 import '../theme.dart';
 import '../widgets/async_view.dart';
 import '../widgets/polling.dart';
@@ -37,7 +39,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
   @override
   void initState() {
     super.initState();
-    final device = AppScope.of(context).devices.byId(widget.deviceId);
+    final device = context.read<DeviceStore>().byId(widget.deviceId);
     if (device != null) _fillForm(device);
   }
 
@@ -57,7 +59,9 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
   @override
   Future<void> poll() async {
     try {
-      final reading = await AppScope.of(context).api.deviceLatest(widget.deviceId);
+      final reading = await context.read<ApiClient>().deviceLatest(
+        widget.deviceId,
+      );
       if (!mounted) return;
       setState(() {
         _reading = reading;
@@ -87,7 +91,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
 
     setState(() => _saving = true);
     try {
-      await AppScope.of(context).devices.update(device.id, update);
+      await context.read<DeviceStore>().update(device.id, update);
       if (!mounted) return;
       showMessage(context, 'Uložené');
     } on ApiException catch (e) {
@@ -100,12 +104,9 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppScope.of(context);
-
-    return ListenableBuilder(
-      listenable: Listenable.merge([scope.devices, scope.tanks]),
-      builder: (context, _) {
-        final device = scope.devices.byId(widget.deviceId);
+    return Consumer2<DeviceStore, TankStore>(
+      builder: (context, deviceStore, tankStore, _) {
+        final device = deviceStore.byId(widget.deviceId);
         if (device == null) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
@@ -156,7 +157,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen>
                 ),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('Žiadna')),
-                  for (final tank in scope.tanks.tanks)
+                  for (final tank in tankStore.tanks)
                     DropdownMenuItem(value: tank.id, child: Text(tank.name)),
                 ],
                 onChanged: (tankId) => _save(device, tankId),

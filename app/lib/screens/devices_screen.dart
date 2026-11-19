@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../main.dart';
 import '../models/device.dart';
+import '../state/device_store.dart';
+import '../state/tank_store.dart';
 import '../widgets/async_view.dart';
 import '../widgets/status_chip.dart';
 import 'device_detail_screen.dart';
@@ -15,24 +17,21 @@ class DevicesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppScope.of(context);
-    final store = scope.devices;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Zariadenia'),
         actions: [
           IconButton(
-            onPressed: store.refresh,
+            onPressed: () => context.read<DeviceStore>().refresh(),
             icon: const Icon(Icons.refresh),
             tooltip: 'Obnoviť',
           ),
         ],
       ),
-      // Merged so a tank rename shows up in the subtitle without a reload.
-      body: ListenableBuilder(
-        listenable: Listenable.merge([store, scope.tanks]),
-        builder: (context, _) {
+      // Listens to the tanks too, so a tank rename shows up in the subtitle
+      // without a reload.
+      body: Consumer2<DeviceStore, TankStore>(
+        builder: (context, store, tanks, _) {
           return AsyncView(
             loading: store.loading,
             loaded: store.loaded,
@@ -50,7 +49,7 @@ class DevicesScreen extends StatelessWidget {
                   final device = store.devices[index];
                   final tank = device.tankId == null
                       ? null
-                      : scope.tanks.byId(device.tankId!);
+                      : tanks.byId(device.tankId!);
 
                   return ListTile(
                     leading: const IconBadge(icon: Icons.sensors),

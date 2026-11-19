@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../api/api_client.dart';
-import '../main.dart';
 import '../models/tank.dart';
 import '../models/tank_level.dart';
+import '../state/tank_store.dart';
 import '../widgets/async_view.dart';
 import '../widgets/level_gauge.dart';
 import '../widgets/status_chip.dart';
@@ -25,29 +26,34 @@ class _TanksScreenState extends State<TanksScreen> {
   /// is where the live view lives.
   Map<int, TankLevel> _levels = {};
 
+  /// Kept from initState so dispose can unsubscribe: by the time dispose runs
+  /// the element is defunct and looking providers up through context is not
+  /// allowed any more.
+  late final TankStore _tanks;
+
   @override
   void initState() {
     super.initState();
     // The tank list itself is already being loaded by HomeShell; wait for it
     // and then fill in the levels.
-    AppScope.of(context).tanks.addListener(_loadLevels);
+    _tanks = context.read<TankStore>()..addListener(_loadLevels);
     _loadLevels();
   }
 
   @override
   void dispose() {
-    AppScope.of(context).tanks.removeListener(_loadLevels);
+    _tanks.removeListener(_loadLevels);
     super.dispose();
   }
 
   Future<void> _refresh() async {
-    await AppScope.of(context).tanks.refresh();
+    await _tanks.refresh();
     // _loadLevels runs via the store listener.
   }
 
   Future<void> _loadLevels() async {
-    final api = AppScope.of(context).api;
-    final tanks = AppScope.of(context).tanks.tanks;
+    final api = context.read<ApiClient>();
+    final tanks = _tanks.tanks;
 
     final levels = <int, TankLevel>{};
     for (final tank in tanks) {
@@ -76,8 +82,6 @@ class _TanksScreenState extends State<TanksScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final store = AppScope.of(context).tanks;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nádrže'),
@@ -94,9 +98,10 @@ class _TanksScreenState extends State<TanksScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Nová nádrž'),
       ),
-      body: ListenableBuilder(
-        listenable: store,
-        builder: (context, _) {
+      // Only the list rebuilds on a store change; the app bar and button do not
+      // depend on it.
+      body: Consumer<TankStore>(
+        builder: (context, store, _) {
           return AsyncView(
             loading: store.loading,
             loaded: store.loaded,

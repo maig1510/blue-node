@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../api/api_client.dart';
-import '../main.dart';
 import '../models/tank.dart';
 import '../models/tank_level.dart';
+import '../state/device_store.dart';
+import '../state/tank_store.dart';
 import '../widgets/async_view.dart';
 import '../widgets/level_gauge.dart';
 import '../widgets/polling.dart';
@@ -36,7 +38,7 @@ class _TankDetailScreenState extends State<TankDetailScreen>
   @override
   Future<void> poll() async {
     try {
-      final level = await AppScope.of(context).api.tankLevel(widget.tankId);
+      final level = await context.read<ApiClient>().tankLevel(widget.tankId);
       if (!mounted) return;
       setState(() {
         _level = level;
@@ -91,11 +93,13 @@ class _TankDetailScreenState extends State<TankDetailScreen>
     // Stop the timer first: the tank is about to stop existing, and a poll
     // landing after the delete would show a spurious error.
     stopPolling();
-    final scope = AppScope.of(context);
+    // Both looked up before the await: after it the screen may be gone.
+    final tanks = context.read<TankStore>();
+    final devices = context.read<DeviceStore>();
     try {
-      await scope.tanks.delete(tank.id);
+      await tanks.delete(tank.id);
       // The backend clears devices.tank_id itself; mirror that in memory.
-      scope.devices.forgetTank(tank.id);
+      devices.forgetTank(tank.id);
       if (!mounted) return;
       Navigator.of(context).pop();
     } on ApiException catch (e) {
@@ -107,18 +111,15 @@ class _TankDetailScreenState extends State<TankDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppScope.of(context);
-
-    return ListenableBuilder(
-      listenable: Listenable.merge([scope.tanks, scope.devices]),
-      builder: (context, _) {
-        final tank = scope.tanks.byId(widget.tankId);
+    return Consumer2<TankStore, DeviceStore>(
+      builder: (context, tankStore, deviceStore, _) {
+        final tank = tankStore.byId(widget.tankId);
         if (tank == null) {
           // Deleted from under us, or the list has not arrived yet.
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
-        final devices = scope.devices.forTank(tank.id);
+        final devices = deviceStore.forTank(tank.id);
 
         return Scaffold(
           appBar: AppBar(
