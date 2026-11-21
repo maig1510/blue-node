@@ -46,8 +46,8 @@
  * @param[in] user_ctx   Opaque context passed to mqtt_manager_register_data_handler().
  */
 typedef void (*mqtt_manager_data_cb_t)(const char *topic, int topic_len,
-                                        const char *data, int data_len,
-                                        void *user_ctx);
+                                       const char *data, int data_len,
+                                       void *user_ctx);
 
 /**
  * @brief Callback invoked whenever the broker session comes up or goes down.
@@ -75,50 +75,51 @@ typedef void (*mqtt_manager_conn_cb_t)(bool connected, void *user_ctx);
  * they must remain valid for as long as the client exists (string literals
  * or static/global buffers are fine; stack buffers are not).
  */
-typedef struct {
-    const char *broker_uri;   /**< e.g. "mqtts://broker.example.com:8883" or
-                                    "mqtt://broker.example.com:1883". Required. */
-    const char *client_id;    /**< MQTT client identifier. NULL lets esp-mqtt
-                                    auto-generate one ("ESP32_" + random suffix). */
-    const char *username;     /**< Optional MQTT username. NULL to omit. */
-    const char *password;     /**< Optional MQTT password. NULL to omit; ignored
-                                    if username is NULL (MQTT requires a username
-                                    to send a password). */
-    const char *ca_cert_pem;  /**< Optional PEM-encoded CA certificate buffer used
-                                    to verify the broker's TLS certificate, e.g. a
-                                    buffer embedded via EMBED_TXTFILES in
-                                    CMakeLists.txt:
-                                        idf_component_register(...
-                                            EMBED_TXTFILES "certs/ca_cert.pem")
-                                    and referenced as:
-                                        extern const uint8_t ca_cert_pem_start[]
-                                            asm("_binary_ca_cert_pem_start");
-                                        extern const uint8_t ca_cert_pem_end[]
-                                            asm("_binary_ca_cert_pem_end");
-                                    NULL = no explicit CA cert (plain mqtt://, or
-                                    mqtts:// relying on a certificate bundle
-                                    enabled elsewhere in menuconfig). */
-    size_t      ca_cert_len;  /**< Length of ca_cert_pem in bytes, including the
-                                    terminating NUL (EMBED_TXTFILES-embedded files
-                                    include it, so passing
-                                    ca_cert_pem_end - ca_cert_pem_start is
-                                    correct). 0 lets esp-mqtt treat ca_cert_pem as
-                                    a plain NUL-terminated string instead. Ignored
-                                    if ca_cert_pem is NULL. */
-    const char *lwt_topic;    /**< Optional Last Will and Testament topic. The broker
-                                    publishes lwt_msg here if the client drops without
-                                    a clean disconnect (power loss, lost network),
-                                    which is what lets subscribers distinguish a dead
-                                    device from an idle one. NULL disables LWT, and
-                                    then every other lwt_* field is ignored. */
-    const char *lwt_msg;      /**< LWT payload. Like the fields above, this is handed
-                                    to esp-mqtt uncopied and must outlive the client. */
-    int         lwt_msg_len;  /**< Length of lwt_msg in bytes. 0 lets esp-mqtt compute
-                                    it with strlen(lwt_msg) — only valid if lwt_msg is
-                                    NUL-terminated. */
-    int         lwt_qos;      /**< LWT QoS level: 0, 1, or 2. */
-    int         lwt_retain;   /**< Non-zero to set the MQTT retain flag on the LWT
-                                    message, so late subscribers still see it. */
+typedef struct
+{
+    const char *broker_uri;  /**< e.g. "mqtts://broker.example.com:8883" or
+                                   "mqtt://broker.example.com:1883". Required. */
+    const char *client_id;   /**< MQTT client identifier. NULL lets esp-mqtt
+                                   auto-generate one ("ESP32_" + random suffix). */
+    const char *username;    /**< Optional MQTT username. NULL to omit. */
+    const char *password;    /**< Optional MQTT password. NULL to omit; ignored
+                                   if username is NULL (MQTT requires a username
+                                   to send a password). */
+    const char *ca_cert_pem; /**< Optional PEM-encoded CA certificate buffer used
+                                   to verify the broker's TLS certificate, e.g. a
+                                   buffer embedded via EMBED_TXTFILES in
+                                   CMakeLists.txt:
+                                       idf_component_register(...
+                                           EMBED_TXTFILES "certs/ca_cert.pem")
+                                   and referenced as:
+                                       extern const uint8_t ca_cert_pem_start[]
+                                           asm("_binary_ca_cert_pem_start");
+                                       extern const uint8_t ca_cert_pem_end[]
+                                           asm("_binary_ca_cert_pem_end");
+                                   NULL = no explicit CA cert (plain mqtt://, or
+                                   mqtts:// relying on a certificate bundle
+                                   enabled elsewhere in menuconfig). */
+    size_t ca_cert_len;      /**< Length of ca_cert_pem in bytes, including the
+                                   terminating NUL (EMBED_TXTFILES-embedded files
+                                   include it, so passing
+                                   ca_cert_pem_end - ca_cert_pem_start is
+                                   correct). 0 lets esp-mqtt treat ca_cert_pem as
+                                   a plain NUL-terminated string instead. Ignored
+                                   if ca_cert_pem is NULL. */
+    const char *lwt_topic;   /**< Optional Last Will and Testament topic. The broker
+                                   publishes lwt_msg here if the client drops without
+                                   a clean disconnect (power loss, lost network),
+                                   which is what lets subscribers distinguish a dead
+                                   device from an idle one. NULL disables LWT, and
+                                   then every other lwt_* field is ignored. */
+    const char *lwt_msg;     /**< LWT payload. Like the fields above, this is handed
+                                   to esp-mqtt uncopied and must outlive the client. */
+    int lwt_msg_len;         /**< Length of lwt_msg in bytes. 0 lets esp-mqtt compute
+                                   it with strlen(lwt_msg) — only valid if lwt_msg is
+                                   NUL-terminated. */
+    int lwt_qos;             /**< LWT QoS level: 0, 1, or 2. */
+    int lwt_retain;          /**< Non-zero to set the MQTT retain flag on the LWT
+                                   message, so late subscribers still see it. */
 } mqtt_manager_config_t;
 
 /**
