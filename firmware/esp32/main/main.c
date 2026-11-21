@@ -1,3 +1,4 @@
+#include <stdatomic.h>
 #include <stdio.h>
 #include "esp_event.h"
 #include "esp_log.h"
@@ -39,11 +40,18 @@ typedef enum
 static volatile node_mode_t s_mode = MODE_STARTING;
 static a01nyub_t s_sensor;
 
-/* Placeholder: settings arrive here (e.g. {"interval_ms":2000}) once the
- * config handling lands. Runs on the mqtt event task — keep it short. */
-static void on_config(const char *json, int len, void *user_ctx)
+/* Set on the mqtt event task when the device was removed in the app, acted on
+ * by the measurement loop: the client cannot be stopped from its own task. */
+static atomic_bool s_unregistered = false;
+
+/* Runs on the mqtt event task: only flag it, see decommission(). */
+static void on_settings(const node_protocol_settings_t *settings, void *user_ctx)
 {
-    ESP_LOGI(TAG, "Config received: %.*s", len, json);
+    if (!settings->registered)
+    {
+        ESP_LOGW(TAG, "Removed in the app");
+        atomic_store(&s_unregistered, true);
+    }
 }
 
 /* Placeholder: one-shot actions arrive here (e.g. {"cmd":"restart"}). */
@@ -139,6 +147,36 @@ static void fail_and_restart(const char *what, esp_err_t err)
 }
 
 /**
+ * The device was removed in the app: leave nothing behind and start over.
+ *
+ * Clears the retained state on the broker and disconnects cleanly (so the Last
+ * Will is not published for an id the backend no longer knows), then erases
+ * the configuration. After the restart the node is unprovisioned and boots
+ * into pairing, ready to be added again.
+ */
+static void decommission(void)
+{
+    status_led_set(STATUS_LED_HOLD_RESET);
+
+    esp_err_t ret = node_protocol_clear_state();
+    if (ret != ESP_OK)
+    {
+        /* Not fatal: the broker then keeps a stale retained state that
+         * ingest drops anyway (the node_id is no longer registered). */
+        ESP_LOGW(TAG, "Could not clear the retained state: %s", esp_err_to_name(ret));
+    }
+    mqtt_manager_stop();
+
+    ret = node_config_factory_reset();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Factory reset failed: %s", esp_err_to_name(ret));
+    }
+    ESP_LOGW(TAG, "Decommissioned, restarting into pairing");
+    esp_restart();
+}
+
+/**
  * Pairing mode: one BLE window, then a restart into whatever it produced.
  * Only returns if the node is still unprovisioned and nobody paired.
  */
@@ -195,7 +233,7 @@ static void run_node(void)
     /* Before mqtt_manager_init(): the state topic built here is what the client
      * needs as its Last Will topic. */
     node_protocol_config_t proto_cfg = {
-        .on_config = on_config,
+        .on_settings = on_settings,
         .on_command = on_command,
     };
     ESP_ERROR_CHECK(node_protocol_init(&proto_cfg));
@@ -224,6 +262,11 @@ static void run_node(void)
 
     while (true)
     {
+        if (atomic_load(&s_unregistered))
+        {
+            decommission();
+        }
+
         esp_err_t ret = a01nyub_get_data(&s_sensor, &distance);
 
         if (ret == ESP_OK)

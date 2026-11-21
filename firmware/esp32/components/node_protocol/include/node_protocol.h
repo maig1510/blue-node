@@ -58,7 +58,25 @@
  *
  * Both are retained, so a late subscriber always sees the last one.
  * node_protocol_publish_state() may add fields on top of this; keep "status"
- * in anything it publishes.
+ * in anything it publishes. node_protocol_clear_state() removes the retained
+ * state altogether, for a node that is leaving for good.
+ *
+ * @section config_payload Config payload contract
+ *
+ * The backend publishes the config topic retained, so it is a description of
+ * how the node should be, delivered on every (re)connect - not an event.
+ * This component parses it into node_protocol_settings_t:
+ *
+ *     {"registered": false}   the device was removed in the app: the node
+ *                             is to forget its configuration and go back to
+ *                             pairing (main.c does that, see decommission())
+ *
+ * A field the payload does not carry keeps its default, so a newer backend
+ * can add fields without breaking an older node, and an older payload never
+ * turns a setting off by omission. A zero-length payload is the broker
+ * reporting that the retained config was cleared (the backend does this on
+ * every registration) and is not a config at all; it is ignored, as is a
+ * payload that is not a JSON object.
  *
  * @section threading Threading model
  *
@@ -72,7 +90,7 @@
  *     event task, and deinit() refuses to run until mqtt_manager_stop() has
  *     retired it.
  *   - The publish helpers may be called from any task at any time.
- *   - on_config, on_command and on_connected run on the esp-mqtt event task.
+ *   - on_settings, on_command and on_connected run on the esp-mqtt event task.
  *
  * There is deliberately no mutex here. Everything init() writes — the device
  * id, the topics, the callback pointers — is written before the event task
@@ -133,7 +151,31 @@ typedef enum
 } node_topic_t;
 
 /**
- * @brief Callback invoked for an inbound config or command message.
+ * @brief The settings carried by the config topic, see @ref config_payload.
+ *
+ * Every field has a default that applies when the payload does not mention it.
+ */
+typedef struct
+{
+    bool registered; /**< False once the device was removed in the app. Default true. */
+} node_protocol_settings_t;
+
+/**
+ * @brief Callback invoked for each config message that parsed.
+ *
+ * Same task, latency and hand-off rules as node_protocol_msg_cb_t. In
+ * particular it must not stop the MQTT client: esp_mqtt_client_stop() cannot
+ * be called from the event task this runs on, so acting on
+ * node_protocol_settings_t::registered == false means flagging the
+ * application task, which then tears down (see main.c).
+ *
+ * @param[in] settings  Parsed settings; only valid for the duration of the call.
+ * @param[in] user_ctx  node_protocol_config_t::user_ctx as passed to node_protocol_init().
+ */
+typedef void (*node_protocol_settings_cb_t)(const node_protocol_settings_t *settings, void *user_ctx);
+
+/**
+ * @brief Callback invoked for an inbound command message.
  *
  * Runs synchronously on the esp-mqtt event task, so keep it fast: MQTT event
  * delivery is blocked while it executes, and long work (or anything that
@@ -179,8 +221,8 @@ typedef struct
 {
     const char *root;                          /**< Topic root, e.g. "blue-node". NULL
                                                      selects NODE_PROTOCOL_ROOT_DEFAULT. */
-    node_protocol_msg_cb_t on_config;          /**< Handler for the config topic. NULL
-                                                     logs incoming config and drops it. */
+    node_protocol_settings_cb_t on_settings;   /**< Handler for parsed config messages.
+                                                     NULL logs incoming config and drops it. */
     node_protocol_msg_cb_t on_command;         /**< Handler for the command topic. NULL
                                                      logs incoming commands and drops them. */
     node_protocol_connected_cb_t on_connected; /**< Called after each successful announce.
@@ -292,6 +334,25 @@ esp_err_t node_protocol_publish_telemetry(const char *json, int len);
  * @return other                  Propagated from mqtt_manager_publish().
  */
 esp_err_t node_protocol_publish_state(const char *json, int len);
+
+/**
+ * @brief Remove this device's retained state from the broker (QoS 1).
+ *
+ * Publishes a zero-length retained message on the state topic, which deletes
+ * the retained "online"/"offline" a late subscriber would otherwise still be
+ * handed. Meant for a node that is leaving for good (removed in the app):
+ * call it, then mqtt_manager_stop() - the clean disconnect suppresses the Last
+ * Will, so nothing is published for this id afterwards.
+ *
+ * Returns once the message is handed to the client, which writes it to the
+ * socket before returning; a DISCONNECT sent after it reaches the broker
+ * after it, so no extra wait is needed before stopping.
+ *
+ * @return ESP_OK                 Message handed to the client.
+ * @return ESP_ERR_INVALID_STATE  Not initialized, or no broker session.
+ * @return other                  Propagated from mqtt_manager_publish().
+ */
+esp_err_t node_protocol_clear_state(void);
 
 /**
  * @brief Unhook from mqtt_manager and clear all module state.

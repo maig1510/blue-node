@@ -1,0 +1,4 @@
+dependencies:
+  # Parses the config payload (see the config payload contract in
+  # node_protocol.h). IDF 6 no longer ships the built-in json component.
+  espressif/cjson: "^1.7.19"

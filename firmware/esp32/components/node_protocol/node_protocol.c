@@ -11,6 +11,7 @@
 
 #include "node_protocol.h"
 
+#include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -50,7 +51,7 @@ static struct
     char online_payload[NODE_PROTOCOL_STATE_PAYLOAD_SIZE];
     int online_payload_len;
     bool initialized;
-    node_protocol_msg_cb_t on_config;
+    node_protocol_settings_cb_t on_settings;
     node_protocol_msg_cb_t on_command;
     node_protocol_connected_cb_t on_connected;
     void *user_ctx;
@@ -73,6 +74,42 @@ static bool topic_matches(const char *topic, int topic_len, node_topic_t categor
 }
 
 /**
+ * @brief Parse a config payload into settings, see @ref config_payload.
+ *
+ * @return false when there is nothing to hand on: a zero-length payload (the
+ *         retained config was cleared) or one that is not a JSON object.
+ */
+static bool parse_settings(const char *data, int len, node_protocol_settings_t *out)
+{
+    if (len <= 0)
+    {
+        ESP_LOGD(TAG, "config cleared");
+        return false;
+    }
+
+    cJSON *json = cJSON_ParseWithLength(data, (size_t)len);
+    if (!cJSON_IsObject(json))
+    {
+        ESP_LOGW(TAG, "Ignoring config that is not a JSON object: %.*s", len, data);
+        cJSON_Delete(json);
+        return false;
+    }
+
+    /* Defaults first: a field the payload does not carry keeps them. */
+    *out = (node_protocol_settings_t){
+        .registered = true,
+    };
+    const cJSON *registered = cJSON_GetObjectItemCaseSensitive(json, "registered");
+    if (cJSON_IsBool(registered))
+    {
+        out->registered = cJSON_IsTrue(registered);
+    }
+
+    cJSON_Delete(json);
+    return true;
+}
+
+/**
  * @brief mqtt_manager data handler: route config and command to the app.
  *
  * Every mqtt_manager data handler sees every message regardless of topic, so
@@ -84,9 +121,10 @@ static void on_mqtt_data(const char *topic, int topic_len,
     if (topic_matches(topic, topic_len, NODE_TOPIC_CONFIG))
     {
         ESP_LOGI(TAG, "config: %.*s", data_len, data);
-        if (s_ctx.on_config)
+        node_protocol_settings_t settings;
+        if (s_ctx.on_settings && parse_settings(data, data_len, &settings))
         {
-            s_ctx.on_config(data, data_len, s_ctx.user_ctx);
+            s_ctx.on_settings(&settings, s_ctx.user_ctx);
         }
     }
     else if (topic_matches(topic, topic_len, NODE_TOPIC_COMMAND))
@@ -203,7 +241,7 @@ esp_err_t node_protocol_init(const node_protocol_config_t *config)
                             ESP_ERR_INVALID_ARG, TAG, "topic root '%s' is too long", root);
     }
 
-    s_ctx.on_config = config->on_config;
+    s_ctx.on_settings = config->on_settings;
     s_ctx.on_command = config->on_command;
     s_ctx.on_connected = config->on_connected;
     s_ctx.user_ctx = config->user_ctx;
@@ -272,6 +310,13 @@ esp_err_t node_protocol_publish_telemetry(const char *json, int len)
 esp_err_t node_protocol_publish_state(const char *json, int len)
 {
     return publish(NODE_TOPIC_STATE, json, len, 1, 1);
+}
+
+esp_err_t node_protocol_clear_state(void)
+{
+    /* A zero-length retained publish deletes the retained message. "" with
+     * length 0 is what mqtt_manager_publish() turns into an empty payload. */
+    return publish(NODE_TOPIC_STATE, "", 0, 1, 1);
 }
 
 esp_err_t node_protocol_deinit(void)
