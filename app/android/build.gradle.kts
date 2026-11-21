@@ -2,6 +2,9 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // Espressif publishes esp-idf-provisioning-android (BLE onboarding) only
+        // through JitPack; see app/build.gradle.kts.
+        maven("https://jitpack.io")
     }
 }
 

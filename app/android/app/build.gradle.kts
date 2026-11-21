@@ -34,8 +34,19 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // R8 keep rules for what BleProvisioningPlugin reaches by reflection.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+}
+
+dependencies {
+    // BLE transport + protocomm security 1 for onboarding a node, used by
+    // BleProvisioningPlugin. Matches the firmware's espressif/network_provisioning.
+    implementation("com.github.espressif:esp-idf-provisioning-android:lib-2.4.4")
+    // The library reports connection state over EventBus but declares it as an
+    // implementation dependency, so subscribing to it needs our own reference.
+    implementation("org.greenrobot:eventbus:3.3.1")
 }
 
 kotlin {

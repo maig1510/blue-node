@@ -7,11 +7,13 @@ import '../state/tank_store.dart';
 import '../widgets/async_view.dart';
 import '../widgets/status_chip.dart';
 import 'device_detail_screen.dart';
+import 'onboarding/add_device_screen.dart';
 
-/// Every node the ingest service has seen.
+/// Every registered node.
 ///
-/// Nothing here creates a device: they register themselves the first time they
-/// publish, so this list is a view of what is out there, not a form.
+/// Nodes are added through the onboarding wizard (the "Pridať" button): it
+/// pairs with the node over BLE, gives it WiFi and registers it. A node that
+/// skipped onboarding never shows up here - ingest drops its data.
 class DevicesScreen extends StatelessWidget {
   const DevicesScreen({super.key});
 
@@ -38,8 +40,8 @@ class DevicesScreen extends StatelessWidget {
             error: store.error,
             isEmpty: store.devices.isEmpty,
             emptyMessage:
-                'Žiadne zariadenia.\nZapni node — zaregistruje sa sám, '
-                'hneď ako pošle prvé meranie.',
+                'Žiadne zariadenia.\nPridaj prvé tlačidlom Pridať - '
+                'spáruješ ho cez Bluetooth a nastavíš mu WiFi.',
             onRetry: store.refresh,
             child: RefreshIndicator(
               onRefresh: store.refresh,
@@ -73,6 +75,17 @@ class DevicesScreen extends StatelessWidget {
             ),
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        // Both tabs live in one IndexedStack, i.e. one route, and the tanks
+        // tab has a FAB of its own: two default hero tags would collide on
+        // every navigation.
+        heroTag: 'add-device',
+        onPressed: () => Navigator.of(context).push<void>(
+          MaterialPageRoute(builder: (_) => const AddDeviceScreen()),
+        ),
+        icon: const Icon(Icons.add),
+        label: const Text('Pridať'),
       ),
     );
   }

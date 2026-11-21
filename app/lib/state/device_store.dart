@@ -43,6 +43,35 @@ class DeviceStore extends ChangeNotifier {
     }
   }
 
+  /// Register a node during onboarding and keep the list in step.
+  ///
+  /// A MAC that was registered before replaces its existing entry instead of
+  /// being added twice.
+  Future<DeviceRegistration> register(String macAddress) async {
+    final registration = await _api.registerDevice(macAddress);
+    _upsert(registration.device);
+    return registration;
+  }
+
+  /// Fetch one device and keep the list in step (onboarding polls this until
+  /// the node comes online).
+  Future<Device> fetch(int id) async {
+    final device = await _api.getDevice(id);
+    _upsert(device);
+    return device;
+  }
+
+  void _upsert(Device device) {
+    final known = devices.any((existing) => existing.id == device.id);
+    devices = known
+        ? [
+            for (final existing in devices)
+              if (existing.id == device.id) device else existing,
+          ]
+        : [...devices, device];
+    notifyListeners();
+  }
+
   Future<Device> update(int id, DeviceUpdate update) async {
     final updated = await _api.updateDevice(id, update);
     devices = [

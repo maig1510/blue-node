@@ -79,6 +79,21 @@ class ApiClient {
         .toList();
   }
 
+  /// Register a node by the MAC read from it over BLE (onboarding).
+  ///
+  /// Idempotent per MAC: a node registered before comes back as it was.
+  Future<DeviceRegistration> registerDevice(String macAddress) async {
+    final (status, body) = await _request(
+      'POST',
+      '/devices',
+      body: {'mac_address': macAddress},
+    );
+    return DeviceRegistration.fromJson(
+      body as Map<String, dynamic>,
+      created: status == 201,
+    );
+  }
+
   Future<Device> getDevice(int id) async => Device.fromJson(
     await _send('GET', '/devices/$id') as Map<String, dynamic>,
   );
@@ -99,6 +114,13 @@ class ApiClient {
   ///
   /// Returns null for responses that legitimately have no body (204).
   Future<Object?> _send(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async => (await _request(method, path, body: body)).$2;
+
+  /// Like [_send], for the callers that also need the success status code.
+  Future<(int, Object?)> _request(
     String method,
     String path, {
     Map<String, dynamic>? body,
@@ -130,8 +152,10 @@ class ApiClient {
     }
 
     // DELETE answers 204 with an empty body, and jsonDecode('') throws.
-    if (response.statusCode == 204 || response.body.isEmpty) return null;
-    return jsonDecode(response.body);
+    if (response.statusCode == 204 || response.body.isEmpty) {
+      return (response.statusCode, null);
+    }
+    return (response.statusCode, jsonDecode(response.body));
   }
 
   /// Turn a FastAPI error body into something worth showing a person.

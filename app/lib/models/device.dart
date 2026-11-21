@@ -1,7 +1,8 @@
 /// A node as the API returns it from /devices.
 ///
-/// Rows are created by the ingest service the moment a node first publishes,
-/// so most fields arrive on their own. Only [name], [tankId] and
+/// Rows are created by onboarding (POST /devices, see OnboardingController),
+/// before the node ever publishes; firmware, online state and last-seen then
+/// arrive on their own through ingest. Only [name], [tankId] and
 /// [sensorOffsetMm] are set by a human.
 class Device {
   const Device({
@@ -19,11 +20,12 @@ class Device {
 
   final int id;
 
-  /// Technical identifier from the MQTT topic: the low three bytes of the MAC,
-  /// e.g. `2B70C8`.
+  /// Technical identifier from the MQTT topic: the full MAC as 12 hex digits,
+  /// e.g. `A4C1F82B70C8`.
   final String nodeId;
 
-  /// Full MAC, null until the node has announced itself on the state topic.
+  /// Full MAC in colon notation. Always present for a device registered by
+  /// onboarding; nullable only for rows from before registration existed.
   final String? macAddress;
 
   final String? name;
@@ -53,6 +55,33 @@ class Device {
     lastSeenAt: json['last_seen_at'] == null
         ? null
         : DateTime.parse(json['last_seen_at'] as String),
+  );
+}
+
+/// What POST /devices answers: the device, plus what the node needs next.
+class DeviceRegistration {
+  const DeviceRegistration({
+    required this.device,
+    required this.brokerUri,
+    required this.created,
+  });
+
+  final Device device;
+
+  /// The broker address to hand to the node over BLE as the last step.
+  final String brokerUri;
+
+  /// False when the MAC was already registered (201 vs 200): re-onboarding
+  /// keeps the device's name, tank and history.
+  final bool created;
+
+  factory DeviceRegistration.fromJson(
+    Map<String, dynamic> json, {
+    required bool created,
+  }) => DeviceRegistration(
+    device: Device.fromJson(json),
+    brokerUri: json['broker_uri'] as String,
+    created: created,
   );
 }
 

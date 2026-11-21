@@ -1,5 +1,21 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- BLE onboarding of a node (BleProvisioningPlugin). Android 12+ has its
+         own Bluetooth permissions; neverForLocation tells it the scan is not
+         used to locate the user, so no location permission is needed there. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- Android 11 and older: the legacy Bluetooth permissions, and location,
+         without which those versions return no BLE scan results at all. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/>
+    <!-- Onboarding needs BLE, the rest of the app does not. -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
     <application
         android:label="blue_node"
         android:name="${applicationName}"
