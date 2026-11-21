@@ -48,31 +48,35 @@ CREATE TRIGGER tanks_touch_updated_at
     BEFORE UPDATE ON tanks
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
--- One physical node. Rows are created by the ingest service the first time a
--- node publishes (auto-provisioning), so a new device only has to be powered
--- on; name, tank_id and sensor_offset_mm are filled in afterwards through the
--- API.
+-- One physical node. A row exists only once the node has been onboarded: the
+-- app reads the MAC over BLE while pairing and registers it (POST /devices)
+-- before it hands the node its broker address, so a node never publishes
+-- before it is known here. ingest drops traffic from any node without a row.
+-- name, tank_id and sensor_offset_mm are filled in afterwards through the API.
 --
--- node_id is the technical identifier the firmware puts in the topic: the low
--- three bytes of the WiFi MAC as uppercase hex (see node_protocol.c). The full
--- MAC only arrives on the state topic, so mac_address stays NULL until the
--- node announces itself once. It is UNIQUE because it is the key a QR-code
--- onboarding flow will look a device up by.
+-- mac_address is the identity; registering the same MAC again returns the
+-- existing row, which is what makes re-onboarding (new WiFi, factory reset)
+-- keep the device's name, tank and history.
+--
+-- node_id is what the firmware puts in its MQTT topics: the full WiFi MAC as
+-- 12 uppercase hex digits (see node_protocol.c). It is GENERATED from
+-- mac_address so the two can never disagree, and UNIQUE because ingest looks
+-- devices up by it.
 CREATE TABLE devices (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    node_id      TEXT        NOT NULL UNIQUE,
-    mac_address  MACADDR     UNIQUE,
+    mac_address  MACADDR     NOT NULL UNIQUE,
+    node_id      TEXT        NOT NULL UNIQUE
+                 GENERATED ALWAYS AS (upper(replace(mac_address::text, ':', ''))) STORED,
     name         TEXT,
 
     -- ON DELETE SET NULL: deleting a tank should not be blocked by a node
     -- being assigned to it. The node outlives the tank and simply becomes
-    -- unassigned, and its telemetry hangs off the device rather than the tank,
-    -- so no measurement is lost either way.
+    -- unassigned.
     tank_id      BIGINT REFERENCES tanks(id) ON DELETE SET NULL,
 
     -- How far the sensor face sits above the top rim of the tank. 0 means
     -- flush with the rim. Without it a distance reading cannot be turned into
-    -- a water height - see api/tank_level.py.
+    -- a water height - see api/calculators/base.py.
     sensor_offset_mm INTEGER NOT NULL DEFAULT 0,
 
     firmware     TEXT,
@@ -92,9 +96,19 @@ CREATE TABLE devices (
 -- plain table is supported by TimescaleDB (the reverse direction is not, which
 -- is why devices must never reference telemetry). It also means a device
 -- cannot be deleted while its measurements exist - which is what we want.
+--
+-- tank_id is a snapshot of devices.tank_id at the moment the reading arrived,
+-- written by ingest. A measurement describes the water in a tank, and the
+-- sensor is a replaceable instrument, so the history is meant to belong to the
+-- tank: moving a node to another tank must not drag its old readings along,
+-- and swapping a broken sensor must not orphan the tank's history. NULL means
+-- the node was not assigned to any tank at the time. ON DELETE SET NULL keeps
+-- deleting a tank unblocked for now; what deleting a tank or a device should
+-- do to the history is decided together with device removal.
 CREATE TABLE telemetry (
     time        TIMESTAMPTZ NOT NULL DEFAULT now(),
     device_id   BIGINT      NOT NULL REFERENCES devices(id),
+    tank_id     BIGINT      REFERENCES tanks(id) ON DELETE SET NULL,
     distance_mm INTEGER
 );
 
@@ -102,3 +116,4 @@ CREATE TABLE telemetry (
 SELECT create_hypertable('telemetry', by_range('time'));
 
 CREATE INDEX ON telemetry (device_id, time DESC);
+CREATE INDEX ON telemetry (tank_id, time DESC);

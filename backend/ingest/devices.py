@@ -1,9 +1,16 @@
 """The `devices` table as the ingest side sees it.
 
-Auto-provisioning: a node that publishes for the first time gets a row here on
-the spot, with nothing but its node_id filled in. Naming it and assigning it to
-a tank happens later through the API - dropping its telemetry until someone
-registers it would lose data for no benefit on a private broker.
+No auto-provisioning: a device row is created only by onboarding (the app
+registers the node's MAC through POST /devices before the node learns its
+broker address). Anything published under a node_id without a row - a node
+that skipped onboarding, a stale simulator, a retained message left over from
+an older schema - is dropped here, and logged once per UNKNOWN_LOG_INTERVAL_S
+so a node publishing every second cannot flood the log.
+
+There is no node_id -> devices.id cache: telemetry resolves the device inside
+its own INSERT (see main.py), so a lookup costs nothing extra, and there is
+nothing to go stale when a device is reassigned to another tank or, later,
+removed.
 
 Every function takes the connection as an argument rather than holding one:
 main.py owns the connection and replaces it when Postgres goes away.
@@ -20,58 +27,50 @@ log = logging.getLogger("ingest.devices")
 # for a field nobody reads at that resolution.
 LAST_SEEN_INTERVAL_S = float(os.getenv("LAST_SEEN_INTERVAL_S", "30"))
 
-# ON CONFLICT DO UPDATE rather than DO NOTHING: DO NOTHING suppresses the
-# RETURNING row on a conflict, and the id is the whole point of the call. The
-# assignment is a no-op that exists only to make the row eligible for RETURNING.
-RESOLVE_SQL = """
-    INSERT INTO devices (node_id) VALUES (%s)
-    ON CONFLICT (node_id) DO UPDATE SET node_id = EXCLUDED.node_id
-    RETURNING id
-"""
+# How often a message from the same unregistered node may be logged.
+UNKNOWN_LOG_INTERVAL_S = float(os.getenv("UNKNOWN_LOG_INTERVAL_S", "60"))
 
 TOUCH_SQL = "UPDATE devices SET last_seen_at = now() WHERE id = %s"
 
-# COALESCE so a payload without mac/fw (the broker-published offline LWT, or an
-# older firmware) never blanks out what an earlier message already established.
+# UPDATE, never INSERT: a state message must not bring an unregistered node
+# into existence. COALESCE so a payload without fw (the broker-published
+# offline LWT, or an older firmware) never blanks out what an earlier message
+# already established. The MAC is not written here at all - registration put
+# it there, and node_id is derived from it.
 STATE_SQL = """
-    INSERT INTO devices (node_id, mac_address, firmware, is_online, last_seen_at)
-    VALUES (%s, %s::macaddr, %s, %s, now())
-    ON CONFLICT (node_id) DO UPDATE SET
-        mac_address  = COALESCE(EXCLUDED.mac_address, devices.mac_address),
-        firmware     = COALESCE(EXCLUDED.firmware, devices.firmware),
-        is_online    = EXCLUDED.is_online,
-        last_seen_at = EXCLUDED.last_seen_at
+    UPDATE devices SET
+        firmware     = COALESCE(%s, firmware),
+        is_online    = %s,
+        last_seen_at = now()
+    WHERE node_id = %s
     RETURNING id
 """
-
-# node_id -> devices.id. Ids never change for a given node_id, so this needs no
-# expiry - only clear_cache() on reconnect, in case the database was replaced
-# underneath us (a `down -v` re-runs init.sql and restarts the identity column).
-_ids: dict[str, int] = {}
 
 # devices.id -> monotonic timestamp of the last last_seen_at write.
 _touched: dict[int, float] = {}
 
+# node_id -> monotonic timestamp of the last "unknown node" log line.
+_unknown_logged: dict[str, float] = {}
+
 
 def clear_cache():
-    """Forget every cached id. Call after reconnecting to Postgres."""
-    _ids.clear()
+    """Forget the throttling state. Call after reconnecting to Postgres.
+
+    A replacement database (a `down -v` re-runs init.sql and restarts the
+    identity column) would hand out the same ids for different devices.
+    """
     _touched.clear()
+    _unknown_logged.clear()
 
 
-def resolve(conn, node_id: str) -> int:
-    """Return devices.id for this node, creating the device if it is new."""
-    cached = _ids.get(node_id)
-    if cached is not None:
-        return cached
-
-    with conn.cursor() as cur:
-        cur.execute(RESOLVE_SQL, (node_id,))
-        (device_id,) = cur.fetchone()
-
-    _ids[node_id] = device_id
-    log.info("Device %s resolved to id %s", node_id, device_id)
-    return device_id
+def note_unknown(node_id: str, category: str):
+    """Log that a message from an unregistered node was dropped, rate-limited."""
+    now = time.monotonic()
+    last = _unknown_logged.get(node_id)
+    if last is not None and now - last < UNKNOWN_LOG_INTERVAL_S:
+        return
+    _unknown_logged[node_id] = now
+    log.warning("Dropping %s from unregistered node %s (not onboarded)", category, node_id)
 
 
 def touch_last_seen(conn, device_id: int):
@@ -86,19 +85,27 @@ def touch_last_seen(conn, device_id: int):
     _touched[device_id] = now
 
 
-def apply_state(conn, node_id: str, status: str, mac: str | None, firmware: str | None):
-    """Record a state message, creating the device if it is new.
+def apply_state(conn, node_id: str, status: str, firmware: str | None) -> int | None:
+    """Record a state message of a registered node.
 
     `status` is the payload's "status" field; anything other than "online"
     counts as offline, which covers the broker-published Last Will.
+
+    Returns devices.id, or None when the node is not registered (the message
+    is then dropped).
     """
     is_online = status == "online"
 
     with conn.cursor() as cur:
-        cur.execute(STATE_SQL, (node_id, mac, firmware, is_online))
-        (device_id,) = cur.fetchone()
+        cur.execute(STATE_SQL, (firmware, is_online, node_id))
+        row = cur.fetchone()
 
-    _ids[node_id] = device_id
+    if row is None:
+        note_unknown(node_id, "state")
+        return None
+
+    (device_id,) = row
     # The row was just written, so telemetry need not write it again right away.
     _touched[device_id] = time.monotonic()
     log.info("Device %s (id %s) is %s", node_id, device_id, status)
+    return device_id

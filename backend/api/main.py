@@ -1,8 +1,9 @@
 """HTTP API over the blue-node database.
 
 Telemetry is read-only here - the ingest side owns those writes. What this API
-owns is everything no machine can know by itself: a device's name, which tank
-it watches, how high above the rim it is mounted, and the tanks themselves.
+owns is everything no machine can know by itself: which devices exist at all
+(registered during onboarding), a device's name, which tank it watches, how
+high above the rim it is mounted, and the tanks themselves.
 
 Error conventions differ on purpose:
 
@@ -19,6 +20,7 @@ as open as the reads. Acceptable for a LAN development setup, not beyond it.
 """
 
 import logging
+import os
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Response
@@ -30,6 +32,8 @@ import calculators
 import db
 from models import (
     Device,
+    DeviceCreate,
+    DeviceRegistration,
     DeviceUpdate,
     LatestReading,
     Reading,
@@ -41,6 +45,11 @@ from models import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("api")
+
+# The broker address as seen from a node on the WiFi, not from inside the
+# compose network: onboarding hands it to the node over BLE. Unset means
+# onboarding cannot work at all, which POST /devices reports as such.
+MQTT_PUBLIC_URI = os.getenv("MQTT_PUBLIC_URI")
 
 DEVICE_COLUMNS = """
     id, node_id, mac_address::text AS mac_address, name, tank_id,
@@ -141,6 +150,49 @@ def list_devices():
         with conn.cursor() as cur:
             cur.execute(f"SELECT {DEVICE_COLUMNS} FROM devices ORDER BY id")
             return cur.fetchall()
+
+
+@app.post("/devices", response_model=DeviceRegistration, status_code=201)
+def register_device(device: DeviceCreate, response: Response):
+    """Register a node by its MAC during onboarding.
+
+    Idempotent per MAC: a MAC that is already registered answers 200 with the
+    existing row instead of 409. Onboarding the same node again - after a
+    factory reset, or a pairing that broke off after this call - must hand it
+    back its old identity, name, tank and history rather than fail or make a
+    duplicate. A new MAC answers 201.
+
+    The broker address goes out in the same response because the app relays it
+    to the node over BLE as the very next step; the node publishes nothing
+    before it has it, which is what guarantees the row exists first.
+    """
+    if not MQTT_PUBLIC_URI:
+        raise HTTPException(
+            status_code=500, detail="MQTT_PUBLIC_URI is not configured on the api service"
+        )
+
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            # DO NOTHING suppresses RETURNING on a conflict, which is exactly
+            # the signal needed here to tell "created" from "already known".
+            cur.execute(
+                f"""INSERT INTO devices (mac_address) VALUES (%s::macaddr)
+                    ON CONFLICT (mac_address) DO NOTHING
+                    RETURNING {DEVICE_COLUMNS}""",
+                (device.mac_address,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    f"SELECT {DEVICE_COLUMNS} FROM devices WHERE mac_address = %s::macaddr",
+                    (device.mac_address,),
+                )
+                row = cur.fetchone()
+                response.status_code = 200
+            else:
+                log.info("Registered device %s (id %s)", row["node_id"], row["id"])
+
+    return DeviceRegistration(**row, broker_uri=MQTT_PUBLIC_URI)
 
 
 @app.get("/devices/{device_id}", response_model=Device)

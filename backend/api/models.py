@@ -1,19 +1,26 @@
 """Request and response schemas."""
 
+import re
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import calculators
 from calculators import Shape
 
 
+# Separators are optional and may be ":" or "-", so the MAC can be pasted in
+# any of the usual spellings; what is left has to be exactly six hex octets.
+_MAC_SEPARATORS = re.compile(r"[:-]")
+_MAC_HEX = re.compile(r"[0-9A-Fa-f]{12}")
+
+
 class Device(BaseModel):
-    """A registered node. Rows are created by the ingest service."""
+    """A registered node. Rows are created by POST /devices during onboarding."""
 
     id: int
     node_id: str
-    mac_address: str | None = None
+    mac_address: str
     name: str | None = None
     tank_id: int | None = None
     sensor_offset_mm: int
@@ -23,8 +30,40 @@ class Device(BaseModel):
     last_seen_at: datetime | None = None
 
 
+class DeviceCreate(BaseModel):
+    """Body of POST /devices: the MAC the app read from the node over BLE.
+
+    The MAC is the device's identity - node_id is derived from it in the
+    database - so it is normalised here to one canonical spelling
+    (AA:BB:CC:DD:EE:FF) before it gets anywhere near SQL.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mac_address: str
+
+    @field_validator("mac_address")
+    @classmethod
+    def normalise_mac(cls, value: str) -> str:
+        digits = _MAC_SEPARATORS.sub("", value.strip())
+        if not _MAC_HEX.fullmatch(digits):
+            raise ValueError("expected a MAC address of six hex octets, e.g. A4:C1:F8:2B:70:C8")
+        digits = digits.upper()
+        return ":".join(digits[i:i + 2] for i in range(0, 12, 2))
+
+
+class DeviceRegistration(Device):
+    """What POST /devices answers: the device row plus what the node needs next.
+
+    broker_uri is handed to the node over BLE as the last onboarding step, so
+    the firmware carries no broker address of its own.
+    """
+
+    broker_uri: str
+
+
 class DeviceUpdate(BaseModel):
-    """The fields a human owns. Everything else is written by ingest.
+    """The fields a human owns. Everything else is written by registration or ingest.
 
     name and tank_id are nullable *and* optional, and the two mean different
     things: omitting a field leaves it alone, sending null clears it. The

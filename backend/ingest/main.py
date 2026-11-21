@@ -4,10 +4,11 @@ Subscribes to two topics of every node:
 
   - blue-node/+/telemetry, one row per message into the `telemetry` hypertable
   - blue-node/+/state, which keeps the `devices` row up to date (online flag,
-    full MAC, firmware version)
+    firmware version)
 
-Devices are provisioned on arrival: the first message from an unknown node
-creates its row, so a new node only has to be powered on.
+Only registered nodes are recorded. A device row is created by onboarding
+(POST /devices on the api), never here; messages from any other node_id are
+dropped - see devices.py.
 """
 
 import json
@@ -29,7 +30,16 @@ MQTT_TELEMETRY_TOPIC = os.getenv("MQTT_TELEMETRY_TOPIC", "blue-node/+/telemetry"
 MQTT_STATE_TOPIC = os.getenv("MQTT_STATE_TOPIC", "blue-node/+/state")
 PG_DSN = os.getenv("PG_DSN", "postgresql://blue:blue@timescaledb:5432/bluenode")
 
-INSERT_SQL = "INSERT INTO telemetry (device_id, distance_mm) VALUES (%s, %s)"
+# Resolves the device and snapshots the tank it is assigned to in the same
+# statement: tank_id is always the assignment at the moment the reading
+# arrived (see the telemetry comment in init.sql), with no cache that a PATCH
+# in the app could leave stale. An unregistered node_id selects nothing, so
+# nothing is inserted and RETURNING comes back empty.
+INSERT_SQL = """
+    INSERT INTO telemetry (device_id, tank_id, distance_mm)
+    SELECT id, tank_id, %s FROM devices WHERE node_id = %s
+    RETURNING device_id
+"""
 
 
 def connect_pg():
@@ -68,11 +78,17 @@ def on_disconnect(client, userdata, flags, reason_code, properties):
 
 
 def handle_telemetry(conn, node_id, payload):
-    device_id = devices.resolve(conn, node_id)
     distance_mm = payload.get("distance_mm")
 
     with conn.cursor() as cur:
-        cur.execute(INSERT_SQL, (device_id, distance_mm))
+        cur.execute(INSERT_SQL, (distance_mm, node_id))
+        row = cur.fetchone()
+
+    if row is None:
+        devices.note_unknown(node_id, "telemetry")
+        return
+
+    (device_id,) = row
     devices.touch_last_seen(conn, device_id)
     log.debug("%s distance_mm=%s", node_id, distance_mm)
 
@@ -87,7 +103,6 @@ def handle_state(conn, node_id, payload):
         conn,
         node_id,
         payload.get("status", ""),
-        payload.get("mac"),
         payload.get("fw"),
     )
 
@@ -108,8 +123,8 @@ def on_message(client, userdata, msg):
             log.debug("Ignoring message on %s", msg.topic)
     except psycopg.Error as exc:
         log.error("Query failed (%s), reconnecting to Postgres", exc)
-        # The ids were handed out by the database we just lost; a replacement
-        # database would not agree with them.
+        # The ids behind the throttling state were handed out by the database
+        # we just lost; a replacement database would not agree with them.
         devices.clear_cache()
         userdata["conn"] = connect_pg()
     except Exception as exc:
