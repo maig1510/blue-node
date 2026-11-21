@@ -3,4 +3,22 @@
 #
 # default:
 CONFIG_IDF_TARGET="esp32c6"
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# ESP32-C6-MINI-1 (core-board) and the C6 DevKits carry 4 MB of flash. With
+# BLE provisioning the image outgrew the 1.5 MB single-app partition, so the
+# table is our own: two 1.875 MB app slots, ready for OTA (see partitions.csv).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# BLE onboarding (components/provisioning): NimBLE is the smaller of the two
+# stacks. One connection at a time is part of the pairing security model -
+# a second phone cannot connect while the first is being confirmed.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+
+# Protocomm security 1 (X25519 + AES-CTR) secures the pairing session. IDF 6
+# turned it off by default in favour of security 2, which needs a PoP the node
+# has no way to show; see provisioning.h for the security model.
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y

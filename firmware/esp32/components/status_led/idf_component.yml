@@ -1,0 +1,5 @@
+dependencies:
+  # WS2812 driver (RMT backend). Only status_led.c's WS2812 path uses it, but
+  # it is declared unconditionally to keep the manifest independent of Kconfig;
+  # with another LED type nothing from it ends up referenced in the image.
+  espressif/led_strip: "^3.0.3"

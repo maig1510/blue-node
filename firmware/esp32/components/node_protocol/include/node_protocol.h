@@ -39,15 +39,17 @@
  *
  * @section state_payload State payload contract
  *
- * The backend registers devices from these two messages, so their shape is an
- * interface, not an implementation detail:
+ * The backend keeps its device rows up to date from these two messages, so
+ * their shape is an interface, not an implementation detail. (It does not
+ * *create* devices from them: a node is registered during onboarding, before
+ * it ever connects, and anything published under an unregistered id is
+ * dropped.)
  *
  *     online:  {"status":"online","mac":"AA:BB:CC:DD:EE:FF","fw":"1.0.0"}
  *     offline: {"status":"offline"}
  *
- * The online message carries the full MAC because the topic only contains its
- * low three bytes; it is what identifies the physical board for provisioning.
- * "fw" is the application version from the app descriptor (see
+ * The online message repeats the MAC the topic id is built from, in the usual
+ * colon notation. "fw" is the application version from the app descriptor (see
  * esp_app_get_description()), i.e. whatever the project version is set to.
  *
  * The offline message is published by the *broker*, not the device, so it can
@@ -98,8 +100,8 @@
 /** Topic root used when node_protocol_config_t::root is NULL. */
 #define NODE_PROTOCOL_ROOT_DEFAULT "blue-node"
 
-/** Size of the device id string, including the terminating NUL. */
-#define NODE_PROTOCOL_DEVICE_ID_SIZE 7
+/** Size of the device id string (12 hex digits), including the terminating NUL. */
+#define NODE_PROTOCOL_DEVICE_ID_SIZE 13
 
 /** Size of the MAC address string "AA:BB:CC:DD:EE:FF", including the terminating NUL. */
 #define NODE_PROTOCOL_MAC_STR_SIZE 18
@@ -121,12 +123,13 @@
  * Doubles as the index into this component's topic table, so NODE_TOPIC_COUNT
  * must stay last.
  */
-typedef enum {
-    NODE_TOPIC_TELEMETRY,  /**< device -> backend: periodic measurement data. */
-    NODE_TOPIC_STATE,      /**< device -> backend: current device state, retained. */
-    NODE_TOPIC_CONFIG,     /**< backend -> device: persistent settings. */
-    NODE_TOPIC_COMMAND,    /**< backend -> device: one-shot actions. */
-    NODE_TOPIC_COUNT,      /**< Number of categories; not a valid category. */
+typedef enum
+{
+    NODE_TOPIC_TELEMETRY, /**< device -> backend: periodic measurement data. */
+    NODE_TOPIC_STATE,     /**< device -> backend: current device state, retained. */
+    NODE_TOPIC_CONFIG,    /**< backend -> device: persistent settings. */
+    NODE_TOPIC_COMMAND,   /**< backend -> device: one-shot actions. */
+    NODE_TOPIC_COUNT,     /**< Number of categories; not a valid category. */
 } node_topic_t;
 
 /**
@@ -172,16 +175,17 @@ typedef void (*node_protocol_connected_cb_t)(void *user_ctx);
  * Unlike mqtt_manager_config_t, @p root is copied into this component's own
  * topic buffers, so it does not have to outlive the call.
  */
-typedef struct {
-    const char *root;                            /**< Topic root, e.g. "blue-node". NULL
-                                                       selects NODE_PROTOCOL_ROOT_DEFAULT. */
-    node_protocol_msg_cb_t on_config;            /**< Handler for the config topic. NULL
-                                                       logs incoming config and drops it. */
-    node_protocol_msg_cb_t on_command;           /**< Handler for the command topic. NULL
-                                                       logs incoming commands and drops them. */
-    node_protocol_connected_cb_t on_connected;   /**< Called after each successful announce.
-                                                       NULL to skip. */
-    void *user_ctx;                              /**< Opaque pointer passed to every callback. */
+typedef struct
+{
+    const char *root;                          /**< Topic root, e.g. "blue-node". NULL
+                                                     selects NODE_PROTOCOL_ROOT_DEFAULT. */
+    node_protocol_msg_cb_t on_config;          /**< Handler for the config topic. NULL
+                                                     logs incoming config and drops it. */
+    node_protocol_msg_cb_t on_command;         /**< Handler for the command topic. NULL
+                                                     logs incoming commands and drops them. */
+    node_protocol_connected_cb_t on_connected; /**< Called after each successful announce.
+                                                     NULL to skip. */
+    void *user_ctx;                            /**< Opaque pointer passed to every callback. */
 } node_protocol_config_t;
 
 /**
@@ -229,8 +233,8 @@ esp_err_t node_protocol_init(const node_protocol_config_t *config);
 void node_protocol_apply_lwt(mqtt_manager_config_t *mqtt_cfg);
 
 /**
- * @brief Return the device id: the low three bytes of the WiFi station MAC as
- *        uppercase hex, e.g. "A4C1F8".
+ * @brief Return the device id: the WiFi station MAC as 12 uppercase hex
+ *        digits, e.g. "A4C1F82B70C8".
  *
  * @return Pointer to this component's copy, valid until node_protocol_deinit().
  *         An empty string if node_protocol_init() has not been called.
@@ -240,9 +244,8 @@ const char *node_protocol_device_id(void);
 /**
  * @brief Return the full WiFi station MAC as "AA:BB:CC:DD:EE:FF".
  *
- * The device id is only the low three bytes of this; the full address is what
- * identifies the board itself, and is what the online state message carries to
- * the backend (see @ref state_payload).
+ * The same address as node_protocol_device_id(), in colon notation; it is what
+ * the online state message carries (see @ref state_payload).
  *
  * @return Pointer to this component's copy, valid until node_protocol_deinit().
  *         An empty string if node_protocol_init() has not been called.

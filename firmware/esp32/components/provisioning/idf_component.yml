@@ -1,0 +1,6 @@
+dependencies:
+  # BLE transport, protocomm security 1 and the prov-scan endpoint. In IDF 6
+  # this replaces the removed built-in wifi_provisioning component.
+  espressif/network_provisioning: "^1.2.4"
+  # JSON for the bn-* endpoints. IDF 6 no longer ships the built-in json component.
+  espressif/cjson: "^1.7.19"

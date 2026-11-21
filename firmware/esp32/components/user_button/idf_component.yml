@@ -1,0 +1,3 @@
+dependencies:
+  # Debounced button driver with long-press timing (iot_button).
+  espressif/button: "^4.2.3"

@@ -1,0 +1,29 @@
+menu "User button"
+
+    config USER_BUTTON_GPIO
+        int "Button GPIO"
+        default 9
+        range 0 30
+        help
+            GPIO9 is the BOOT button on the ESP32-C6-DevKit. It is a strapping
+            pin (held low at reset it selects download mode), which is exactly
+            why it is a good choice: the same button flashes the chip and
+            drives pairing, and it is wired with a pull-up already.
+
+    config USER_BUTTON_ACTIVE_LOW
+        bool "Button pulls the pin low when pressed"
+        default y
+
+    config USER_BUTTON_PAIRING_HOLD_MS
+        int "Hold time to enter pairing mode (ms)"
+        default 3000
+        range 1000 30000
+
+    config USER_BUTTON_RESET_HOLD_MS
+        int "Hold time for a factory reset (ms)"
+        default 10000
+        range 2000 60000
+        help
+            Must be longer than the pairing hold time.
+
+endmenu
